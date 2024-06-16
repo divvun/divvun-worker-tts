@@ -1,0 +1,14 @@
+[package]
+name = "divvun-worker-tts"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+divvun-runtime = { version = "0.1.0", path = "../divvun-runtime", default-features = false }
+poem = "3.0.1"
+serde = "1.0.203"
+serde_json = "1.0.117"
+tokio = { version = "1.38.0", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
