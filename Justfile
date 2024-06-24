@@ -16,6 +16,13 @@ pwd := `pwd`
 #         --features divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
 #     @rm -r {{tmp}}
 
+build-linux:
+    @ARTIFACT_PATH=/usr \
+        LZMA_API_STATIC=1 \
+        TMP_PATH={{tmp}} \
+        PYO3_CONFIG_FILE={{pwd}}/pyo3-linux.txt \
+        cargo build --target x86_64-unknown-linux-gnu --release
+
 build-macos:
     # Workaround for macOS eagerly linking dylibs no matter what we tell it
     mkdir -p {{tmp}}/lib
