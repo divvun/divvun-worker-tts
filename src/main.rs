@@ -143,7 +143,7 @@ async fn run() -> anyhow::Result<()> {
     let config = Config::parse();
     
     tracing::info!("Starting pipeline from path: {}", config.bundle_path);
-    std::env::set_var("PYTHONHOME", std::env::current_dir().unwrap());
+    unsafe { std::env::set_var("PYTHONHOME", std::env::current_dir().unwrap()) };
 
     let bundle = Arc::new(Bundle::from_bundle(config.bundle_path)?);
     tracing::info!("Pipeline ready");

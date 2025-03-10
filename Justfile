@@ -2,8 +2,9 @@ tmp := `mktemp -d`
 pwd := `pwd`
 
 build:
-    cargo build --release --no-default-features \
-        --features divvun-runtime/mod-speech,divvun-runtime/mod-ssml,divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
+    LIBTORCH=/usr cargo build --release --no-default-features \
+        --features divvun-runtime/mod-speech,divvun-runtime/mod-ssml,divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun \
+        -vv
 
 build-linux:
     # {{pwd}}/linux/libtorch
