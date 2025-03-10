@@ -1,27 +1,19 @@
-# macos-cpython-dist := "/Users/brendan/git/necessary/python-build-standalone/dist/cpython-3.11.7-aarch64-apple-darwin-pgo-20240206T1427.tar.zst"
-# macos-cpython-dist-sha256 := "359639d1ecaddb05a9361822e6cf9dc227b5dbb123e6d573566fff4dd80945d3"
-
-# linux-cpython-dist := "/Users/brendan/Downloads/cpython-3.11.7-aarch64-unknown-linux-gnu-pgo-20240225T1814.tar.zst"
-# linux-cpython-dist-sha256 := "bb3caad7d7970aac5377153070932eea429a5919dadd11e2b4b4f05869bd62df"
-
 tmp := `mktemp -d`
 pwd := `pwd`
 
-# build-linux:
-#     @pyoxidizer generate-python-embedding-artifacts --system-rust \
-#         {{tmp}} {{linux-cpython-dist}} {{linux-cpython-dist-sha256}}
-#     @sed -ie 's/\.so.*//g' {{tmp}}/pyo3-build-config-file.txt
-#     @ARTIFACT_PATH={{tmp}} PYO3_CONFIG_FILE={{tmp}}/pyo3-build-config-file.txt \
-#         cargo build -p divvun-runtime-cli --no-default-features --release \
-#         --features divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
-#     @rm -r {{tmp}}
+build:
+    cargo build --release --no-default-features \
+        --features divvun-runtime/mod-speech,divvun-runtime/mod-ssml,divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
 
 build-linux:
-    @ARTIFACT_PATH=/usr \
-        LZMA_API_STATIC=1 \
-        TMP_PATH={{tmp}} \
-        PYO3_CONFIG_FILE={{pwd}}/pyo3-linux.txt \
-        cargo build --target x86_64-unknown-linux-gnu --release
+    # {{pwd}}/linux/libtorch
+    export ARTIFACT_PATH=/usr
+    # export LZMA_API_STATIC=1
+    export TMP_PATH={{tmp}}
+    # export LIBTORCH={{pwd}}/linux/libtorch/lib
+    # export LIBTORCH_BYPASS_VERSION_CHECK=1
+    cross build --target x86_64-unknown-linux-gnu --release --no-default-features \
+        --features divvun-runtime/mod-speech,divvun-runtime/mod-ssml,divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
 
 build-macos:
     # Workaround for macOS eagerly linking dylibs no matter what we tell it

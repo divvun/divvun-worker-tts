@@ -1,11 +1,12 @@
 [package]
 name = "divvun-worker-tts"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0.86"
-divvun-runtime = { version = "0.1.0", path = "../divvun-runtime", default-features = false }
+clap = { version = "4.5.31", features = ["derive", "env"] }
+divvun-runtime = { version = "0.1.0", path = "../divvun-runtime", default-features = false, features = ["mod-speech"] }
 poem = "3.0.1"
 serde = "1.0.203"
 serde_json = "1.0.117"
