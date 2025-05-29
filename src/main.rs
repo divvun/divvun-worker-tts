@@ -1,10 +1,14 @@
-use std::{ops::Deref, sync::Arc};
+use std::{fmt::Display, ops::Deref, sync::Arc};
 
 use clap::Parser;
 use divvun_runtime::{Bundle, ast::PipelineHandle, modules::Input};
-use futures_util::{FutureExt, StreamExt, TryStreamExt as _};
+use futures_util::StreamExt;
 use poem::{
-    handler, listener::TcpListener, middleware::Cors, post, web::{Data, Html, Json, Path, Query}, EndpointExt, IntoResponse, Response, Route, Server
+    EndpointExt, IntoResponse, Response, Route, Server, handler,
+    listener::{TcpListener, UnixListener},
+    middleware::Cors,
+    post,
+    web::{Data, Html, Json},
 };
 use tokio::sync::Mutex;
 
@@ -19,13 +23,9 @@ struct Config {
     #[arg(required = true)]
     speech_bundle_path: String,
 
-    /// Port to listen on
-    #[arg(short, long, env = "PORT", default_value = "4000")]
-    port: u16,
-
-    /// Host address to bind to
-    #[arg(short, long, env = "HOST", default_value = "127.0.0.1")]
-    host: String,
+    /// Address to bind to. Formats: tcp://host:port or unix:///path/to/socket
+    #[arg(short, long, env = "ADDRESS", default_value = "tcp://127.0.0.1:4000")]
+    address: String,
 
     /// Speaker to use
     #[arg(short, long, env = "SPEAKER", default_value = "0")]
@@ -36,16 +36,52 @@ struct Config {
     language: i32,
 }
 
+#[derive(Debug)]
+enum ListenerAddress {
+    Tcp { host: String, port: u16 },
+    Unix { path: String },
+}
+
+impl Display for ListenerAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ListenerAddress::Tcp { host, port } => write!(f, "http://{}:{}", host, port),
+            ListenerAddress::Unix { path } => write!(f, "path: {}", path),
+        }
+    }
+}
+
+impl ListenerAddress {
+    fn parse(address: &str) -> anyhow::Result<Self> {
+        if let Some(tcp_part) = address.strip_prefix("tcp://") {
+            let (host, port_str) = tcp_part.split_once(':').ok_or_else(|| {
+                anyhow::anyhow!("Invalid TCP address format. Expected tcp://host:port")
+            })?;
+
+            let port: u16 = port_str
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid port number: {}", port_str))?;
+
+            Ok(ListenerAddress::Tcp {
+                host: host.to_string(),
+                port,
+            })
+        } else if let Some(unix_part) = address.strip_prefix("unix://") {
+            Ok(ListenerAddress::Unix {
+                path: unix_part.to_string(),
+            })
+        } else {
+            Err(anyhow::anyhow!(
+                "Invalid address format. Use tcp://host:port or unix:///path/to/socket"
+            ))
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ProcessInput {
     text: String,
 }
-
-#[derive(Debug, Clone, Copy)]
-struct SpeakerId(i32);
-
-#[derive(Debug, Clone, Copy)]
-struct LanguageId(i32);
 
 #[handler]
 async fn process(
@@ -271,9 +307,19 @@ async fn run() -> anyhow::Result<()> {
         })))
         .with(Cors::default());
 
-    Server::new(TcpListener::bind((config.host, config.port)))
-        .run(app)
-        .await?;
+    let address = ListenerAddress::parse(&config.address)?;
+
+    tracing::info!("Starting server on {}", address);
+    match address {
+        ListenerAddress::Unix { path } => {
+            Server::new(UnixListener::bind(path)).run(app).await?;
+        }
+        ListenerAddress::Tcp { host, port } => {
+            Server::new(TcpListener::bind((host, port)))
+                .run(app)
+                .await?;
+        }
+    }
 
     Ok(())
 }
