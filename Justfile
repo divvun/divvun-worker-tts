@@ -6,10 +6,10 @@ build-linux:
     mkdir -p {{tmp}}/lib
     LZMA_API_STATIC=1 \
         TMP_PATH={{tmp}} \
-        LIBTORCH=/opt/libtorch \
+        LIBTORCH=/usr \
         LIBTORCH_BYPASS_VERSION_CHECK=1 \
         cargo build --release
-    patchelf --set-rpath /opt/libtorch/lib ./target/x86_64-unknown-linux-gnu/release/divvun-worker-tts
+    # patchelf --set-rpath /opt/libtorch/lib ./target/x86_64-unknown-linux-gnu/release/divvun-worker-tts
     rm -rf {{tmp}}
 
 
