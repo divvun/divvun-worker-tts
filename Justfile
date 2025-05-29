@@ -13,21 +13,24 @@ build-linux:
     export TMP_PATH={{tmp}}
     # export LIBTORCH={{pwd}}/linux/libtorch/lib
     # export LIBTORCH_BYPASS_VERSION_CHECK=1
-    cross build --target x86_64-unknown-linux-gnu --release --no-default-features \
-        --features divvun-runtime/mod-speech,divvun-runtime/mod-ssml,divvun-runtime/mod-cg3,divvun-runtime/mod-hfst,divvun-runtime/mod-divvun
+    cross build --target x86_64-unknown-linux-gnu --release
 
 build-macos:
     # Workaround for macOS eagerly linking dylibs no matter what we tell it
     mkdir -p {{tmp}}/lib
-    cp -r /opt/homebrew/opt/icu4c/lib/*.a {{tmp}}/lib
-    @ARTIFACT_PATH=/opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11 \
-        LZMA_API_STATIC=1 \
+    ln -s /opt/homebrew/opt/icu4c/lib/*.a {{tmp}}/lib
+    ln -s /opt/libtorch/lib/*.a {{tmp}}/lib
+    @# ARTIFACT_PATH=/opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11 
+    @# PYO3_CONFIG_FILE={{pwd}}/pyo3-mac.txt 
+    LZMA_API_STATIC=1 \
         TMP_PATH={{tmp}} \
-        PYO3_CONFIG_FILE={{pwd}}/pyo3-mac.txt \
+        LIBTORCH=/opt/libtorch \
+        LIBTORCH_BYPASS_VERSION_CHECK=1 \
         cargo build --release
-    @install_name_tool -change /opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/Python @loader_path/libpython3.11.dylib ./target/release/divvun-worker-tts
-    cp /opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/Python ./target/release/libpython3.11.dylib
-    @rm -rf {{tmp}}
+    @# install_name_tool -change /opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/Python @loader_path/libpython3.11.dylib ./target/release/divvun-worker-tts
+    @# cp /opt/homebrew/opt/python@3.11/Frameworks/Python.framework/Versions/3.11/Python ./target/release/libpython3.11.dylib
+    install_name_tool -add_rpath /opt/libtorch/lib ./target/release/divvun-worker-tts
+    rm -rf {{tmp}}
 
 # build-lib-macos-aarch64:
 #     # Workaround for macOS eagerly linking dylibs no matter what we tell it

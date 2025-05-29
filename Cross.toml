@@ -1,0 +1,20 @@
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    # "curl -fsSL https://apertium.projectjj.com/apt/install-nightly.sh | bash",
+    # "apt-get update && apt-get install -y ca-certificates gpg wget unzip software-properties-common && apt remove -y --purge --auto-remove cmake",
+    # "add-apt-repository -y ppa:kitware/ppa",
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get install -y wget unzip libsqlite3-dev:$CROSS_DEB_ARCH libboost-all-dev:$CROSS_DEB_ARCH libc++-dev:$CROSS_DEB_ARCH libc++abi-dev:$CROSS_DEB_ARCH",
+    "wget -O libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.4.0%2Bcpu.zip && unzip libtorch.zip && cp -ar libtorch/* /usr && rm -rf libtorch.zip libtorch",
+]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:local"
+
+[target.x86_64-unknown-linux-gnu.env]
+# volumes = ["LIBTORCH=/Users/brendan/git/necessary/divvun/divvun-worker-tts/linux/libtorch"]
+passthrough = [
+    # "LIBTORCH=/Users/brendan/git/necessary/divvun/divvun-worker-tts/linux/libtorch",
+    "CARGO_NET_GIT_FETCH_WITH_CLI=true",
+    "LIBTORCH_BYPASS_VERSION_CHECK=1",
+    # "LIBTORCH_STATIC=1",
+    "LZMA_API_STATIC=1"
+]
