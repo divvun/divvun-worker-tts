@@ -1,7 +1,7 @@
-use std::{collections::HashMap, fmt::Display, ops::Deref, path::PathBuf, sync::Arc, u8};
+use std::{collections::HashMap, fmt::Display, path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use divvun_runtime::{Bundle, ast::PipelineHandle, modules::Input};
+use divvun_runtime::{Bundle, modules::Input};
 use futures_util::StreamExt;
 use poem::{
     EndpointExt, IntoResponse, Response, Route, Server, get, handler,
@@ -11,7 +11,6 @@ use poem::{
     post,
     web::{Data, Html, Json, Query},
 };
-use tokio::sync::Mutex;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -33,6 +32,7 @@ type Config = HashMap<String, VoiceConfig>;
 #[derive(Debug, serde::Deserialize)]
 struct VoiceConfig {
     language: usize,
+    #[allow(dead_code)]
     speakers: Vec<usize>,
 }
 
@@ -97,6 +97,8 @@ async fn process(
     Query(query): Query<ProcessQuery>,
     Json(body): Json<ProcessInput>,
 ) -> impl IntoResponse {
+    let time_start = std::time::Instant::now();
+
     let text = match holder.text.get(&query.language) {
         Some(text) => text,
         None => {
@@ -213,8 +215,16 @@ async fn process(
 
     drop(writer);
 
+    let time = time_start.elapsed().as_millis();
+
     let out = out.into_inner();
-    tracing::info!("Generated {} bytes.", out.len());
+    tracing::info!(
+        time_ms = time,
+        language = query.language,
+        speaker = query.speaker,
+        "generated {} bytes.",
+        out.len()
+    );
 
     Response::builder()
         .header("Content-Type", "audio/wav")
@@ -240,15 +250,13 @@ const PAGE: &str = r#"
 </head>
 <body>
 <div class="container">
-<textarea class="text">
-
-</textarea>
+<textarea class="text" autofocus></textarea>
 <button class="doit">
 Speak
 </button>
 <audio controls class="audio"></audio>
 <script>
-document.querySelector(".doit").addEventListener("click", async (e) => {
+const submit = async (e) => {
     const node = document.querySelector(".doit")
     const audio = document.querySelector(".audio")
     e.preventDefault()
@@ -268,8 +276,16 @@ document.querySelector(".doit").addEventListener("click", async (e) => {
     const blob = new Blob([buffer], { type: "audio/wav" });
     audio.src = URL.createObjectURL(blob);
     audio.play()
-})
+}
 
+document.querySelector(".doit").addEventListener("click", submit);
+
+// When Cmd+Enter or Ctrl+Enter is pressed, submit the form
+document.querySelector(".text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        submit(e);
+    }
+})
 
 </script>
 </div>
@@ -301,13 +317,19 @@ async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
-    let config: Config = toml::from_str(&std::fs::read_to_string(args.config_path)?)?;
+    tracing::info!("Loading config from {}", args.config_path.display());
+    let config: Config = toml::from_str(&std::fs::read_to_string(&args.config_path)?)?;
+    tracing::info!(
+        "Loading speech bundle from {}",
+        args.speech_bundle_path.display()
+    );
     let speech = Bundle::from_bundle(&args.speech_bundle_path)?;
     let parent_path = args.speech_bundle_path.parent().unwrap();
 
     let mut text = HashMap::new();
 
     for (language, voice_config) in config {
+        tracing::info!("Loading text bundle for language {}", language);
         let bundle = Bundle::from_bundle(parent_path.join(format!("text-{}.drb", language)))?;
         text.insert(voice_config.language, bundle);
     }
