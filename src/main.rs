@@ -1,39 +1,39 @@
-use std::{fmt::Display, ops::Deref, sync::Arc};
+use std::{collections::HashMap, fmt::Display, ops::Deref, path::PathBuf, sync::Arc, u8};
 
 use clap::Parser;
 use divvun_runtime::{Bundle, ast::PipelineHandle, modules::Input};
 use futures_util::StreamExt;
 use poem::{
-    EndpointExt, IntoResponse, Response, Route, Server, handler,
+    EndpointExt, IntoResponse, Response, Route, Server, get, handler,
+    http::StatusCode,
     listener::{TcpListener, UnixListener},
     middleware::Cors,
     post,
-    web::{Data, Html, Json},
+    web::{Data, Html, Json, Query},
 };
 use tokio::sync::Mutex;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Config {
-    /// Path to text processor bundle
-    #[arg(required = true)]
-    text_processor_bundle_path: String,
-
+struct Args {
     /// Path to speech bundle
     #[arg(required = true)]
-    speech_bundle_path: String,
+    speech_bundle_path: PathBuf,
 
     /// Address to bind to. Formats: tcp://host:port or unix:///path/to/socket
     #[arg(short, long, env = "ADDRESS", default_value = "tcp://127.0.0.1:4000")]
     address: String,
 
-    /// Speaker to use
-    #[arg(short, long, env = "SPEAKER", default_value = "0")]
-    speaker: i32,
+    /// Configuration file
+    #[arg(short, long, env = "CONFIG", default_value = "config.toml")]
+    config_path: PathBuf,
+}
 
-    /// Language to use
-    #[arg(short, long, env = "LANGUAGE", default_value = "0")]
-    language: i32,
+type Config = HashMap<String, VoiceConfig>;
+#[derive(Debug, serde::Deserialize)]
+struct VoiceConfig {
+    language: usize,
+    speakers: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -83,17 +83,59 @@ struct ProcessInput {
     text: String,
 }
 
+#[derive(serde::Deserialize)]
+struct ProcessQuery {
+    #[serde(default)]
+    speaker: usize,
+    #[serde(default)]
+    language: usize,
+}
+
 #[handler]
 async fn process(
-    Data(mut speech_pipeline): Data<&Arc<Mutex<SpeechPipeline>>>,
-    Data(mut text_pipeline): Data<&Arc<Mutex<TextPipeline>>>,
+    Data(holder): Data<&Arc<PipelineHolder>>,
+    Query(query): Query<ProcessQuery>,
     Json(body): Json<ProcessInput>,
 ) -> impl IntoResponse {
-    let mut speech_pipeline_guard = speech_pipeline.lock().await;
-    let mut text_pipeline_guard = text_pipeline.lock().await;
+    let text = match holder.text.get(&query.language) {
+        Some(text) => text,
+        None => {
+            return Json(serde_json::json!({
+                "error": "Language not found".to_string()
+            }))
+            .with_status(StatusCode::BAD_REQUEST)
+            .into_response();
+        }
+    };
 
-    let speech_pipeline = &mut speech_pipeline_guard.pipeline;
-    let text_pipeline = &mut text_pipeline_guard.pipeline;
+    let mut speech_pipeline = match holder
+        .speech
+        .create(serde_json::json!({
+            "language": query.language,
+            "speaker": query.speaker,
+        }))
+        .await
+    {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "error": e.to_string()
+            }))
+            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+        }
+    };
+
+    let mut text_pipeline = match text.create(serde_json::json!({})).await {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "error": e.to_string()
+            }))
+            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+        }
+    };
 
     let mut stream = text_pipeline.forward(Input::String(body.text)).await;
 
@@ -141,6 +183,7 @@ async fn process(
                 return Json(serde_json::json!({
                     "error": e.to_string()
                 }))
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR)
                 .into_response();
             }
         }
@@ -239,75 +282,45 @@ async fn process_get() -> impl IntoResponse {
     Html(PAGE).into_response()
 }
 
+#[handler]
+async fn health_get() -> impl IntoResponse {
+    "OK".to_string().into_response()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     Ok(run().await?)
 }
 
-struct TextPipeline {
-    pipeline: PipelineHandle,
-}
-
-impl Deref for TextPipeline {
-    type Target = PipelineHandle;
-
-    fn deref(&self) -> &Self::Target {
-        &self.pipeline
-    }
-}
-
-struct SpeechPipeline {
-    pipeline: PipelineHandle,
-}
-
-impl Deref for SpeechPipeline {
-    type Target = PipelineHandle;
-
-    fn deref(&self) -> &Self::Target {
-        &self.pipeline
-    }
+struct PipelineHolder {
+    speech: Bundle,
+    text: HashMap<usize, Bundle>,
 }
 
 async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let config = Config::parse();
+    let args = Args::parse();
+    let config: Config = toml::from_str(&std::fs::read_to_string(args.config_path)?)?;
+    let speech = Bundle::from_bundle(&args.speech_bundle_path)?;
+    let parent_path = args.speech_bundle_path.parent().unwrap();
 
-    let speech_bundle = Arc::new(Bundle::from_bundle(config.speech_bundle_path)?);
-    let speech_pipeline = match speech_bundle
-        .create(serde_json::json!({
-            "speaker": config.speaker,
-            "language": config.language
-        }))
-        .await
-    {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            tracing::error!("{:?}", e);
-            return Err(e.into());
-        }
-    };
+    let mut text = HashMap::new();
 
-    let text_bundle = Arc::new(Bundle::from_bundle(config.text_processor_bundle_path)?);
-    let text_pipeline = match text_bundle.create(serde_json::json!({})).await {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            tracing::error!("{:?}", e);
-            return Err(e.into());
-        }
-    };
+    for (language, voice_config) in config {
+        let bundle = Bundle::from_bundle(parent_path.join(format!("text-{}.drb", language)))?;
+        text.insert(voice_config.language, bundle);
+    }
+
+    let holder = PipelineHolder { speech, text };
 
     let app = Route::new()
         .at("/", post(process).get(process_get))
-        .data(Arc::new(Mutex::new(SpeechPipeline {
-            pipeline: speech_pipeline,
-        })))
-        .data(Arc::new(Mutex::new(TextPipeline {
-            pipeline: text_pipeline,
-        })))
+        .at("/health", get(health_get))
+        .data(Arc::new(holder))
         .with(Cors::default());
 
-    let address = ListenerAddress::parse(&config.address)?;
+    let address = ListenerAddress::parse(&args.address)?;
 
     tracing::info!("Starting server on {}", address);
     match address {
