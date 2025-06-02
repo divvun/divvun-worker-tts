@@ -232,6 +232,72 @@ async fn process(
         .into_response()
 }
 
+#[handler]
+async fn text_process(
+    Data(holder): Data<&Arc<PipelineHolder>>,
+    Query(query): Query<ProcessQuery>,
+    Json(body): Json<ProcessInput>,
+) -> impl IntoResponse {
+    let text = match holder.text.get(&query.language) {
+        Some(text) => text,
+        None => {
+            return Json(serde_json::json!({
+                "error": "Language not found".to_string()
+            }))
+            .with_status(StatusCode::BAD_REQUEST)
+            .into_response();
+        }
+    };
+
+    let mut text_pipeline = match text.create(serde_json::json!({})).await {
+        Ok(pipeline) => pipeline,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "error": e.to_string()
+            }))
+            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response();
+        }
+    };
+
+    let mut stream = text_pipeline.forward(Input::String(body.text)).await;
+
+    #[allow(for_loops_over_fallibles)]
+    let mut stream = Box::pin(async_stream::stream! {
+        while let Some(output) = stream.next().await {
+            let output = match output {
+                Ok(output) => output,
+                Err(e) => {
+                    yield Err(e);
+                    return;
+                }
+            };
+            yield Ok(output);
+        };
+    });
+
+    let mut out = String::new();
+    while let Some(output) = stream.next().await {
+        match output {
+            Ok(output) => {
+                out = output.try_into_string().unwrap();
+            }
+            Err(e) => {
+                return Json(serde_json::json!({
+                    "error": e.to_string()
+                }))
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+                .into_response();
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "text": out
+    }))
+    .into_response()
+}
+
 const PAGE: &str = r#"
 <!doctype html>
 <html>
@@ -255,27 +321,53 @@ const PAGE: &str = r#"
 Speak
 </button>
 <audio controls class="audio"></audio>
+<p class="output"></p>
 <script>
-const submit = async (e) => {
-    const node = document.querySelector(".doit")
-    const audio = document.querySelector(".audio")
-    e.preventDefault()
-    const text = document.querySelector(".text").value.trim()
 
-    node.innerHTML = "Generating..."
-    
+async function speak(text) {
     const response = await fetch(location.href, {
         method: "POST",
         headers: {"Content-Type": "application/json" },
         body: JSON.stringify({ text }),
     })
 
-    node.innerHTML = "Speak"
-
     const buffer = await response.arrayBuffer()
     const blob = new Blob([buffer], { type: "audio/wav" });
     audio.src = URL.createObjectURL(blob);
     audio.play()
+}
+
+async function generateText(text) {
+    const url = new URL(location.href)
+    const response = await fetch(url.origin + "/text" + url.search, {
+        method: "POST",
+        headers: {"Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+    })
+
+    const data = await response.json()
+    document.querySelector(".output").innerText = data.text
+}
+
+const submit = async (e) => {
+    e.preventDefault()
+
+    try {
+        const node = document.querySelector(".doit")
+        const audio = document.querySelector(".audio")
+        const text = document.querySelector(".text").value.trim()
+
+        node.innerHTML = "Generating..."
+        await Promise.all([
+            generateText(text),
+            speak(text),
+        ])
+    } catch (e) {
+        console.error(e)
+        document.querySelector(".output").innerText = "Error: " + e.message
+    } finally {
+        node.innerHTML = "Speak"
+    }
 }
 
 document.querySelector(".doit").addEventListener("click", submit);
@@ -338,6 +430,7 @@ async fn run() -> anyhow::Result<()> {
 
     let app = Route::new()
         .at("/", post(process).get(process_get))
+        .at("/text", post(text_process))
         .at("/health", get(health_get))
         .data(Arc::new(holder))
         .with(Cors::default());
