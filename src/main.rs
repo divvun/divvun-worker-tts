@@ -325,6 +325,8 @@ Speak
 <script>
 
 async function speak(text) {
+    const audio = document.querySelector(".audio")
+    
     const response = await fetch(location.href, {
         method: "POST",
         headers: {"Content-Type": "application/json" },
@@ -354,7 +356,6 @@ const submit = async (e) => {
 
     try {
         const node = document.querySelector(".doit")
-        const audio = document.querySelector(".audio")
         const text = document.querySelector(".text").value.trim()
 
         node.innerHTML = "Generating..."
