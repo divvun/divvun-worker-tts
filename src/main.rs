@@ -339,7 +339,7 @@ async function speak(text) {
 
 async function generateText(text) {
     const url = new URL(location.href)
-    const response = await fetch(url.origin + "/text" + url.search, {
+    const response = await fetch(url.origin + url.pathname + "/text" + url.search, {
         method: "POST",
         headers: {"Content-Type": "application/json" },
         body: JSON.stringify({ text }),
