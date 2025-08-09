@@ -660,7 +660,7 @@ dependencies = [
 [[package]]
 name = "divvun-runtime"
 version = "0.1.0"
-source = "git+ssh://git@github.com/divvun/divvun-runtime.git?branch=multi-lang#02216b6b93d5a13267fb71d397d15ac4d6202a32"
+source = "git+ssh://git@github.com/divvun/divvun-runtime.git#692c4c5194fe0aac8924baf5d85692deeb1b0554"
 dependencies = [
  "anyhow",
  "async-stream",
