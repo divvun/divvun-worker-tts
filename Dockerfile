@@ -51,12 +51,8 @@ RUN apt-get update && apt-get install -y \
     libboost-program-options1.83.0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy libtorch libraries from builder
-COPY --from=builder /usr/lib/libtorch* /usr/lib/
-COPY --from=builder /usr/lib/libmkl* /usr/lib/
-COPY --from=builder /usr/lib/libiomp* /usr/lib/
-COPY --from=builder /usr/lib/libc10* /usr/lib/
-COPY --from=builder /usr/lib/libtorch_cpu* /usr/lib/
+# Copy ALL libtorch libraries including bundled dependencies
+COPY --from=builder /usr/lib/*.so* /usr/lib/
 
 # Copy the binary
 COPY --from=builder /app/target/release/divvun-worker-tts /usr/local/bin/
