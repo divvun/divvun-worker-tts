@@ -5,6 +5,7 @@ FROM rust:latest AS builder
 RUN apt-get update && apt-get install -y \
     libsqlite3-dev \
     libboost-all-dev \
+    cmake \
     wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
