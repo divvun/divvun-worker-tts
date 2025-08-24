@@ -1,8 +1,10 @@
 # Build stage
-FROM rust:latest AS builder
+FROM debian:trixie-slim AS builder
 
-# Install build dependencies
+# Install build dependencies and Rust
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
     libsqlite3-dev \
     libboost-all-dev \
     cmake \
@@ -11,6 +13,10 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Download and install libtorch
 RUN wget -O libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.4.1%2Bcpu.zip \
