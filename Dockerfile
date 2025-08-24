@@ -37,6 +37,11 @@ FROM debian:trixie-slim
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     libgomp1 \
+    libicu76 \
+    libsqlite3-0 \
+    libboost-system1.83.0 \
+    libboost-filesystem1.83.0 \
+    libboost-program-options1.83.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy libtorch libraries from builder
