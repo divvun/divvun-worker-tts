@@ -15,15 +15,15 @@ use poem::{
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to speech bundle
+    /// Path to speech bundle or directory containing tts.drb
     #[arg(required = true)]
-    speech_bundle_path: PathBuf,
+    bundle_path: PathBuf,
 
     /// Address to bind to. Formats: tcp://host:port or unix:///path/to/socket
     #[arg(short, long, env = "ADDRESS", default_value = "tcp://127.0.0.1:4000")]
     address: String,
 
-    /// Configuration file
+    /// Configuration file (ignored if bundle_path is a directory)
     #[arg(short, long, env = "CONFIG", default_value = "config.toml")]
     config_path: PathBuf,
 }
@@ -411,20 +411,35 @@ async fn run() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let args = Args::parse();
-    tracing::info!("Loading config from {}", args.config_path.display());
-    let config: Config = toml::from_str(&std::fs::read_to_string(&args.config_path)?)?;
+
+    let (config_path, speech_bundle_path, bundle_base_path) = if args.bundle_path.is_dir() {
+        // Directory mode: use tts.drb and config.toml from directory
+        let config_path = args.bundle_path.join("config.toml");
+        let speech_bundle_path = args.bundle_path.join("tts.drb");
+        (config_path, speech_bundle_path, args.bundle_path.clone())
+    } else {
+        // File mode: use provided bundle file and config
+        let bundle_base_path = args.bundle_path.parent().unwrap().to_path_buf();
+        (
+            args.config_path.clone(),
+            args.bundle_path.clone(),
+            bundle_base_path,
+        )
+    };
+
+    tracing::info!("Loading config from {}", config_path.display());
+    let config: Config = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
     tracing::info!(
         "Loading speech bundle from {}",
-        args.speech_bundle_path.display()
+        speech_bundle_path.display()
     );
-    let speech = Bundle::from_bundle(&args.speech_bundle_path)?;
-    let parent_path = args.speech_bundle_path.parent().unwrap();
+    let speech = Bundle::from_bundle(&speech_bundle_path)?;
 
     let mut text = HashMap::new();
 
     for (language, voice_config) in config {
         tracing::info!("Loading text bundle for language {}", language);
-        let bundle = Bundle::from_bundle(parent_path.join(format!("text-{}.drb", language)))?;
+        let bundle = Bundle::from_bundle(bundle_base_path.join(format!("text-{}.drb", language)))?;
         text.insert(voice_config.language, bundle);
     }
 

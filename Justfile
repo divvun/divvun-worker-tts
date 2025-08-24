@@ -26,6 +26,9 @@ build-macos:
     install_name_tool -add_rpath /opt/libtorch/lib ./target/release/divvun-worker-tts
     rm -rf {{tmp}}
 
+build-docker:
+    docker buildx build --platform linux/amd64 -t ghcr.io/divvun/divvun-worker-tts:latest .
+
 # build-lib-macos-aarch64:
 #     # Workaround for macOS eagerly linking dylibs no matter what we tell it
 #     mkdir -p {{tmp}}/lib

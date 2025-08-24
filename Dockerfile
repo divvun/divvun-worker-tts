@@ -1,0 +1,63 @@
+# Build stage
+FROM rust:latest AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    libsqlite3-dev \
+    libboost-all-dev \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install libtorch
+RUN wget -O libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.4.1%2Bcpu.zip \
+    && unzip libtorch.zip \
+    && cp -ar libtorch/* /usr \
+    && rm -rf libtorch.zip libtorch
+
+# Set working directory
+WORKDIR /app
+
+# Copy source code
+COPY Cargo.toml Cargo.lock build.rs .cargo ./
+COPY src/ ./src/
+
+# Build the application
+ENV LIBTORCH=/usr
+ENV LIBTORCH_BYPASS_VERSION_CHECK=1
+ENV LZMA_API_STATIC=1
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:trixie-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy libtorch libraries from builder
+COPY --from=builder /usr/lib/libtorch* /usr/lib/
+COPY --from=builder /usr/lib/libmkl* /usr/lib/
+COPY --from=builder /usr/lib/libiomp* /usr/lib/
+COPY --from=builder /usr/lib/libc10* /usr/lib/
+COPY --from=builder /usr/lib/libtorch_cpu* /usr/lib/
+
+# Copy the binary
+COPY --from=builder /app/target/release/divvun-worker-tts /usr/local/bin/
+
+# Set working directory
+WORKDIR /app
+
+# Expose port
+EXPOSE 4000
+
+# Default environment variables
+ENV ADDRESS="tcp://0.0.0.0:4000"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:4000/health || exit 1
+
+# Entry point
+ENTRYPOINT ["divvun-worker-tts"]

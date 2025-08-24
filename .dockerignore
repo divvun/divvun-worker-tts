@@ -1,0 +1,29 @@
+# Build artifacts
+target/
+
+# Bundle files (provided by PV)
+*.drb
+
+# Local development files
+linux/
+config.toml
+*.wav
+*.txz
+index.html
+blerp.txz
+derp.wav
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+CLAUDE.md
+
+# Justfile (not needed in container)
+Justfile
+
+# Cross compilation
+Cross.toml
+pyo3-*.txt
