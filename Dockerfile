@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     bison \
     wget \
     unzip \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust via rustup
