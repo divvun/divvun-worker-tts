@@ -1,0 +1,6 @@
+apiVersion: v2
+name: divvun-worker-tts
+description: A Helm chart for Divvun TTS Worker
+type: application
+version: 0.1.0
+appVersion: "latest"

@@ -29,6 +29,11 @@ build-macos:
 build-docker:
     docker buildx build --platform linux/amd64 -t ghcr.io/divvun/divvun-worker-tts:latest .
 
+push-docker:
+    docker push ghcr.io/divvun/divvun-worker-tts:latest
+
+build-and-push-docker: build-docker push-docker
+
 # build-lib-macos-aarch64:
 #     # Workaround for macOS eagerly linking dylibs no matter what we tell it
 #     mkdir -p {{tmp}}/lib

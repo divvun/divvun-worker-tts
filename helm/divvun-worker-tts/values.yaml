@@ -1,0 +1,52 @@
+# Default values for divvun-worker-tts
+replicaCount: 1
+
+image:
+  repository: ghcr.io/divvun/divvun-worker-tts
+  pullPolicy: Always
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Bundle configuration
+bundle:
+  # Name of the bundle (used for naming resources)
+  name: "default"
+  # PVC name for the bundle files
+  pvcName: "divvun-tts-bundles-pvc"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 4000
+
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "500m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 4000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 4000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+# Environment variables
+env:
+  ADDRESS: "tcp://0.0.0.0:4000"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
