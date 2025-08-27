@@ -1,10 +1,18 @@
-use std::{collections::HashMap, fmt::Display, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    path::PathBuf,
+    str::FromStr as _,
+    sync::Arc,
+};
 
 use clap::Parser;
 use divvun_runtime::{Bundle, modules::Input};
 use futures_util::StreamExt;
+use geoipd::GeoIpLookup;
 use poem::{
-    EndpointExt, IntoResponse, Response, Route, Server, get, handler,
+    EndpointExt, IntoResponse, Request, Response, Route, Server, get, handler,
     http::StatusCode,
     listener::{TcpListener, UnixListener},
     middleware::Cors,
@@ -26,6 +34,12 @@ struct Args {
     /// Configuration file (ignored if bundle_path is a directory)
     #[arg(short, long, env = "CONFIG", default_value = "config.toml")]
     config_path: PathBuf,
+
+    #[arg(long, env = "MAXMIND_ACCOUNT_ID")]
+    maxmind_account_id: Option<String>,
+
+    #[arg(long, env = "MAXMIND_LICENSE_KEY")]
+    maxmind_license_key: Option<String>,
 }
 
 type Config = HashMap<String, VoiceConfig>;
@@ -81,6 +95,8 @@ impl ListenerAddress {
 #[derive(serde::Deserialize)]
 struct ProcessInput {
     text: String,
+    #[serde(default)]
+    country: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -91,13 +107,105 @@ struct ProcessQuery {
     language: usize,
 }
 
+pub async fn country_lookup(geoip: &Arc<GeoIpLookup>, request: &Request) -> Option<String> {
+    let remote_addr = request
+        .header("X-Real-IP")
+        .and_then(|x| {
+            Ipv4Addr::from_str(x)
+                .map(IpAddr::V4)
+                .or_else(|_| Ipv6Addr::from_str(x).map(IpAddr::V6))
+                .ok()
+        })
+        .or_else(|| {
+            request.header("X-Forwarded-For").and_then(|x| {
+                Ipv4Addr::from_str(x)
+                    .map(IpAddr::V4)
+                    .or_else(|_| Ipv6Addr::from_str(x).map(IpAddr::V6))
+                    .ok()
+            })
+        })
+        .or_else(|| request.remote_addr().as_socket_addr().map(|x| x.ip()));
+
+    let Some(ip_addr) = remote_addr else {
+        return None;
+    };
+
+    let Some(country) = geoip.lookup_country(ip_addr).await.ok() else {
+        return None;
+    };
+
+    country
+}
+
+fn parse_accept_languages(header: &str) -> Vec<(String, f32)> {
+    let mut languages = Vec::new();
+
+    for part in header.split(',') {
+        let mut segments = part.trim().split(';');
+        if let Some(lang) = segments.next() {
+            let q_value = segments
+                .find_map(|s| {
+                    if s.trim().starts_with("q=") {
+                        s.trim()[2..].parse::<f32>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1.0);
+            languages.push((lang.to_string(), q_value));
+        }
+    }
+
+    // Sort by quality value (q-value) in descending order
+    languages.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    languages
+}
+
+async fn derive_country(request: &Request) -> Option<String> {
+    if let Some(header) = request.header("Accept-Language") {
+        let languages = parse_accept_languages(header);
+        for (lang, _) in languages {
+            let chunks = lang.split('-').collect::<Vec<_>>();
+            if chunks.len() == 1 {
+                match chunks[0] {
+                    "nb" | "nn" => return Some("NO".to_string()),
+                    "sv" => return Some("SE".to_string()),
+                    "da" => return Some("DK".to_string()),
+                    "is" => return Some("IS".to_string()),
+                    "fi" => return Some("FI".to_string()),
+                    _ => continue,
+                }
+            } else if chunks.len() == 2 {
+                return Some(chunks[1].to_uppercase());
+            } else if chunks.len() == 3 {
+                return Some(chunks[2].to_uppercase());
+            }
+        }
+    }
+
+    if let Some(geoip) = request.data::<Arc<GeoIpLookup>>() {
+        if let Some(country) = country_lookup(geoip, request).await {
+            return Some(country);
+        }
+    }
+
+    None
+}
+
 #[handler]
 async fn process(
     Data(holder): Data<&Arc<PipelineHolder>>,
     Query(query): Query<ProcessQuery>,
     Json(body): Json<ProcessInput>,
+    req: &Request,
 ) -> impl IntoResponse {
     let time_start = std::time::Instant::now();
+    let country = match body.country.as_deref() {
+        Some("") => None,
+        Some(v) => Some(v.to_string()),
+        None => derive_country(req).await,
+    };
 
     let text = match holder.text.get(&query.language) {
         Some(text) => text,
@@ -128,7 +236,18 @@ async fn process(
         }
     };
 
-    let mut text_pipeline = match text.create(serde_json::json!({})).await {
+    let mut config = serde_json::json!({});
+
+    if let Some(country) = country {
+        config.as_object_mut().unwrap().insert(
+            "streamcmd-value".to_string(),
+            serde_json::json!({
+                "country": country,
+            }),
+        );
+    }
+
+    let mut text_pipeline = match text.create(config).await {
         Ok(pipeline) => pipeline,
         Err(e) => {
             return Json(serde_json::json!({
@@ -298,94 +417,7 @@ async fn text_process(
     .into_response()
 }
 
-const PAGE: &str = r#"
-<!doctype html>
-<html>
-<head>
-<title>Divvun TTS</title>
-<meta charset="utf-8">
-<style>
-.container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-}
-
-</style>
-</head>
-<body>
-<div class="container">
-<textarea class="text" autofocus></textarea>
-<button class="doit">
-Speak
-</button>
-<audio controls class="audio"></audio>
-<p class="output"></p>
-<script>
-
-async function speak(text) {
-    const audio = document.querySelector(".audio")
-
-    const response = await fetch(location.href, {
-        method: "POST",
-        headers: {"Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-    })
-
-    const buffer = await response.arrayBuffer()
-    const blob = new Blob([buffer], { type: "audio/wav" });
-    audio.src = URL.createObjectURL(blob);
-    audio.play()
-}
-
-async function generateText(text) {
-    const url = new URL(location.href)
-    const response = await fetch(url.origin + url.pathname + "/text" + url.search, {
-        method: "POST",
-        headers: {"Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-    })
-
-    const data = await response.json()
-    console.log(data)
-    document.querySelector(".output").innerText = data.text
-}
-
-const submit = async (e) => {
-    e.preventDefault()
-    const node = document.querySelector(".doit")
-
-    try {
-        const text = document.querySelector(".text").value.trim()
-
-        node.innerHTML = "Generating..."
-        await Promise.all([
-            generateText(text),
-            speak(text),
-        ])
-    } catch (e) {
-        console.error(e)
-        document.querySelector(".output").innerText = "Error: " + e.message
-    } finally {
-        node.innerHTML = "Speak"
-    }
-}
-
-document.querySelector(".doit").addEventListener("click", submit);
-
-// When Cmd+Enter or Ctrl+Enter is pressed, submit the form
-document.querySelector(".text").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        submit(e);
-    }
-})
-
-</script>
-</div>
-</body>
-</html>
-"#;
+const PAGE: &str = include_str!("../index.html");
 
 #[handler]
 async fn process_get() -> impl IntoResponse {
@@ -445,11 +477,21 @@ async fn run() -> anyhow::Result<()> {
 
     let holder = PipelineHolder { speech, text };
 
+    let geoip = if let (Some(account_id), Some(license_key)) =
+        (args.maxmind_account_id, args.maxmind_license_key)
+    {
+        tracing::info!("Loading GeoIP database");
+        Some(GeoIpLookup::new(account_id, license_key).await?)
+    } else {
+        None
+    };
+
     let app = Route::new()
         .at("/", post(process).get(process_get))
         .at("/text", post(text_process))
         .at("/health", get(health_get))
         .data(Arc::new(holder))
+        .data_opt(geoip)
         .with(Cors::default());
 
     let address = ListenerAddress::parse(&args.address)?;

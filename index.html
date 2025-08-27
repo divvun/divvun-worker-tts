@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+<title>Divvun TTS</title>
+<meta charset="utf-8">
+<style>
+.container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+</style>
+</head>
+<body>
+<div class="container">
+<textarea class="text" autofocus></textarea>
+<button class="doit">
+Speak
+</button>
+<audio controls class="audio"></audio>
+<p class="output"></p>
+
+<details>
+    <summary>Advanced</summary>
+    <label>
+        Country detection behaviour
+        <select id="country-dropdown">
+            <option value="auto">Auto-detect</option>
+            <option value="force">Force no country</option>
+            <option value="custom">Custom country</option>
+        </select>
+    </label>
+    <div>
+        <input id="country-code" type="text" placeholder="Custom country code">
+    </div>
+</details>
+<script>
+
+async function speak(text) {
+    const audio = document.querySelector(".audio")
+    const countryDropdown = document.getElementById("country-dropdown")
+    const countryCodeInput = document.getElementById("country-code")
+
+    const body = { text }
+
+    if (countryDropdown.value === "force") {
+        body.country = ""
+    } else if (countryDropdown.value === "custom") {
+        body.country = countryCodeInput.value?.trim().toUpperCase() ?? ""
+    }
+
+    const response = await fetch(location.href, {
+        method: "POST",
+        headers: {"Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    })
+
+    const buffer = await response.arrayBuffer()
+    const blob = new Blob([buffer], { type: "audio/wav" });
+    audio.src = URL.createObjectURL(blob);
+    audio.play()
+}
+
+// async function generateText(text) {
+//     const url = new URL(location.href)
+//     const response = await fetch(url.origin + url.pathname + "/text" + url.search, {
+//         method: "POST",
+//         headers: {"Content-Type": "application/json" },
+//         body: JSON.stringify({ text }),
+//     })
+
+//     const data = await response.json()
+//     console.log(data)
+//     document.querySelector(".output").innerText = data.text
+// }
+
+const submit = async (e) => {
+    e.preventDefault()
+    const node = document.querySelector(".doit")
+
+    try {
+        const text = document.querySelector(".text").value.trim()
+
+        node.innerHTML = "Generating..."
+        await Promise.all([
+            generateText(text),
+            speak(text),
+        ])
+    } catch (e) {
+        console.error(e)
+        document.querySelector(".output").innerText = "Error: " + e.message
+    } finally {
+        node.innerHTML = "Speak"
+    }
+}
+
+document.querySelector(".doit").addEventListener("click", submit);
+
+// When Cmd+Enter or Ctrl+Enter is pressed, submit the form
+document.querySelector(".text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        submit(e);
+    }
+})
+
+</script>
+</div>
+</body>
+</html>
