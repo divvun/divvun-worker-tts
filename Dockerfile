@@ -29,7 +29,7 @@ RUN wget -O libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-cxx1
 WORKDIR /app
 
 # Copy source code
-COPY Cargo.toml Cargo.lock build.rs .cargo ./
+COPY Cargo.toml Cargo.lock build.rs index.html .cargo ./
 COPY src/ ./src/
 
 # Build the application
