@@ -85,7 +85,7 @@ const submit = async (e) => {
 
         node.innerHTML = "Generating..."
         await Promise.all([
-            generateText(text),
+            // generateText(text),
             speak(text),
         ])
     } catch (e) {
