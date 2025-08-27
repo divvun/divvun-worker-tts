@@ -9,9 +9,6 @@ linux/
 config.toml
 *.wav
 *.txz
-index.html
-blerp.txz
-derp.wav
 
 # Git
 .git/
