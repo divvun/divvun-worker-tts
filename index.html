@@ -66,7 +66,7 @@ async function speak(text) {
 
     const responseText = response.headers.get("X-Divvun-Text")
     if (responseText) {
-        document.querySelector(".output").innerText = responseText
+        document.querySelector(".output").innerText = atob(responseText)
     }
 
     const buffer = await response.arrayBuffer()
