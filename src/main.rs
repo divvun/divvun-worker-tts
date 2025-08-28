@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use base64::prelude::*;
 use clap::Parser;
 use divvun_runtime::{Bundle, modules::Input};
 use futures_util::StreamExt;
@@ -370,8 +371,15 @@ async fn process(
 
     let mut response = Response::builder().header("Content-Type", "audio/wav");
 
-    if query.text {
-        response = response.header("X-Divvun-Text", texts.join("\n"));
+    // Add processed text as base64-encoded header if requested
+    if query.text && !texts.is_empty() {
+        let utf16_bytes = texts
+            .join("\n")
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect::<Vec<u8>>();
+        let encoded_text = base64::prelude::BASE64_STANDARD.encode(utf16_bytes);
+        response = response.header("X-Divvun-Text", encoded_text);
     }
 
     response.body(out).into_response()
