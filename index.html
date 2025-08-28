@@ -45,6 +45,15 @@ Speak
 </details>
 <script>
 
+function fromBinary(encoded) {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return String.fromCharCode(...new Uint16Array(bytes.buffer));
+}
+
 async function speak(text) {
     const audio = document.querySelector(".audio")
     const countryDropdown = document.getElementById("country-dropdown")
@@ -66,7 +75,7 @@ async function speak(text) {
 
     const responseText = response.headers.get("X-Divvun-Text")
     if (responseText) {
-        document.querySelector(".output").innerText = atob(responseText)
+        document.querySelector(".output").innerText = fromBinary(responseText)
     }
 
     const buffer = await response.arrayBuffer()

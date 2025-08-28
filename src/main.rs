@@ -373,8 +373,14 @@ async fn process(
 
     // Add processed text as base64-encoded header if requested
     if query.text && !texts.is_empty() {
-        let utf16_bytes = texts.join("\n");
-        let encoded_text = base64::prelude::BASE64_STANDARD.encode(utf16_bytes);
+        let buffer = texts
+            .join("\n")
+            .trim()
+            .encode_utf16()
+            .map(|u| u.to_le_bytes())
+            .flatten()
+            .collect::<Vec<u8>>();
+        let encoded_text = base64::prelude::BASE64_STANDARD.encode(buffer);
         response = response.header("X-Divvun-Text", encoded_text);
     }
 
