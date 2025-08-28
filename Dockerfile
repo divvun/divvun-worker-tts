@@ -22,8 +22,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Download and install libtorch
 RUN wget -O libtorch.zip https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.8.0%2Bcpu.zip \
     && unzip libtorch.zip \
-    && mkdir -p /opt/libtorch \
-    && cp -ar libtorch/* /opt/libtorch \
+    && cp -ar libtorch/* /usr \
     && rm -rf libtorch.zip libtorch
 
 # Set working directory
@@ -34,7 +33,7 @@ COPY Cargo.toml Cargo.lock build.rs index.html .cargo ./
 COPY src/ ./src/
 
 # Build the application
-ENV LIBTORCH=/opt/libtorch
+ENV LIBTORCH=/usr
 ENV LIBTORCH_BYPASS_VERSION_CHECK=1
 ENV LZMA_API_STATIC=1
 RUN cargo build --release
@@ -53,7 +52,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy ALL libtorch libraries including bundled dependencies
-COPY --from=builder /opt/libtorch /opt
+COPY --from=builder /usr/lib/*.so* /usr/lib/
 
 # Copy the binary
 COPY --from=builder /app/target/release/divvun-worker-tts /usr/local/bin/
