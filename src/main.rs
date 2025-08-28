@@ -105,6 +105,8 @@ struct ProcessQuery {
     speaker: usize,
     #[serde(default)]
     language: usize,
+    #[serde(default)]
+    text: bool,
 }
 
 pub async fn country_lookup(geoip: &Arc<GeoIpLookup>, request: &Request) -> Option<String> {
@@ -193,6 +195,11 @@ async fn derive_country(request: &Request) -> Option<String> {
     None
 }
 
+enum StreamData {
+    Text(String),
+    Audio(Vec<i16>),
+}
+
 #[handler]
 async fn process(
     Data(holder): Data<&Arc<PipelineHolder>>,
@@ -271,6 +278,13 @@ async fn process(
                 }
             };
 
+            match output {
+                Input::String(ref s) => {
+                    yield Ok(StreamData::Text(s.clone()));
+                }
+                _ => {}
+            }
+
             let mut inner_stream = speech_pipeline.forward(output).await;
 
             for output in inner_stream.next().await {
@@ -286,7 +300,7 @@ async fn process(
                                 return;
                             }
                         };
-                        yield Ok(samples);
+                        yield Ok(StreamData::Audio(samples));
                     }
                     Err(e) => {
                         yield Err(e);
@@ -297,9 +311,15 @@ async fn process(
     });
 
     let mut bytes = Vec::new();
+    let mut texts = Vec::new();
     while let Some(output) = stream.next().await {
         match output {
-            Ok(output) => bytes.extend(output),
+            Ok(StreamData::Text(text)) => {
+                if query.text {
+                    texts.push(text);
+                }
+            }
+            Ok(StreamData::Audio(output)) => bytes.extend(output),
             Err(e) => {
                 return Json(serde_json::json!({
                     "error": e.to_string()
@@ -345,76 +365,13 @@ async fn process(
         out.len()
     );
 
-    Response::builder()
-        .header("Content-Type", "audio/wav")
-        .body(out)
-        .into_response()
-}
+    let mut response = Response::builder().header("Content-Type", "audio/wav");
 
-#[handler]
-async fn text_process(
-    Data(holder): Data<&Arc<PipelineHolder>>,
-    Query(query): Query<ProcessQuery>,
-    Json(body): Json<ProcessInput>,
-) -> impl IntoResponse {
-    let text = match holder.text.get(&query.language) {
-        Some(text) => text,
-        None => {
-            return Json(serde_json::json!({
-                "error": "Language not found".to_string()
-            }))
-            .with_status(StatusCode::BAD_REQUEST)
-            .into_response();
-        }
-    };
-
-    let mut text_pipeline = match text.create(serde_json::json!({})).await {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            return Json(serde_json::json!({
-                "error": e.to_string()
-            }))
-            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-            .into_response();
-        }
-    };
-
-    let mut stream = text_pipeline.forward(Input::String(body.text)).await;
-
-    #[allow(for_loops_over_fallibles)]
-    let mut stream = Box::pin(async_stream::stream! {
-        while let Some(output) = stream.next().await {
-            let output = match output {
-                Ok(output) => output,
-                Err(e) => {
-                    yield Err(e);
-                    return;
-                }
-            };
-            yield Ok(output);
-        };
-    });
-
-    let mut out = String::new();
-    while let Some(output) = stream.next().await {
-        match output {
-            Ok(output) => {
-                out = output.try_into_string().unwrap();
-            }
-            Err(e) => {
-                return Json(serde_json::json!({
-                    "error": e.to_string()
-                }))
-                .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-                .into_response();
-            }
-        }
+    if query.text {
+        response = response.header("X-Divvun-Text", texts.join("\n"));
     }
 
-    Json(serde_json::json!({
-        "text": out
-    }))
-    .into_response()
+    response.body(out).into_response()
 }
 
 const PAGE: &str = include_str!("../index.html");
@@ -488,7 +445,6 @@ async fn run() -> anyhow::Result<()> {
 
     let app = Route::new()
         .at("/", post(process).get(process_get))
-        .at("/text", post(text_process))
         .at("/health", get(health_get))
         .data(Arc::new(holder))
         .data_opt(geoip)
