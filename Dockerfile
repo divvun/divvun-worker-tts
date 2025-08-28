@@ -35,6 +35,7 @@ COPY src/ ./src/
 
 # Build the application
 ENV LIBTORCH=/opt/libtorch
+ENV LIBTORCH_BYPASS_VERSION_CHECK=1
 ENV LZMA_API_STATIC=1
 RUN cargo build --release
 
