@@ -10,7 +10,10 @@
     align-items: center;
     gap: 16px;
 }
-
+.output {
+    white-space: pre-wrap;
+    max-width: 600px;
+}
 </style>
 </head>
 <body>
@@ -51,11 +54,16 @@ async function speak(text) {
         body.country = countryCodeInput.value?.trim().toUpperCase() ?? ""
     }
 
-    const response = await fetch(location.href, {
+    const response = await fetch(location.href + "?text=true", {
         method: "POST",
         headers: {"Content-Type": "application/json" },
         body: JSON.stringify(body),
     })
+
+    const responseText = response.headers.get("X-Divvun-Text")
+    if (responseText) {
+        document.querySelector(".output").innerText = responseText
+    }
 
     const buffer = await response.arrayBuffer()
     const blob = new Blob([buffer], { type: "audio/wav" });
@@ -63,20 +71,7 @@ async function speak(text) {
     audio.play()
 }
 
-// async function generateText(text) {
-//     const url = new URL(location.href)
-//     const response = await fetch(url.origin + url.pathname + "/text" + url.search, {
-//         method: "POST",
-//         headers: {"Content-Type": "application/json" },
-//         body: JSON.stringify({ text }),
-//     })
-
-//     const data = await response.json()
-//     console.log(data)
-//     document.querySelector(".output").innerText = data.text
-// }
-
-const submit = async (e) => {
+const submit2 = async (e) => {
     e.preventDefault()
     const node = document.querySelector(".doit")
 
@@ -85,7 +80,6 @@ const submit = async (e) => {
 
         node.innerHTML = "Generating..."
         await Promise.all([
-            // generateText(text),
             speak(text),
         ])
     } catch (e) {
@@ -96,7 +90,7 @@ const submit = async (e) => {
     }
 }
 
-document.querySelector(".doit").addEventListener("click", submit);
+document.querySelector(".doit").addEventListener("click", submit2);
 
 // When Cmd+Enter or Ctrl+Enter is pressed, submit the form
 document.querySelector(".text").addEventListener("keydown", (e) => {
