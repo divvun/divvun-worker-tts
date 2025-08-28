@@ -369,7 +369,10 @@ async fn process(
         out.len()
     );
 
-    let mut response = Response::builder().header("Content-Type", "audio/wav");
+    let mut response = Response::builder()
+        .header("Content-Type", "audio/wav")
+        .header("X-Divvun-Language", query.language.to_string())
+        .header("X-Divvun-Voice", query.speaker.to_string());
 
     // Add processed text as base64-encoded header if requested
     if query.text && !texts.is_empty() {
