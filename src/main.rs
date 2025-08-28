@@ -196,7 +196,7 @@ async fn derive_country(request: &Request) -> Option<String> {
 }
 
 enum StreamData {
-    Text(String),
+    Text(Vec<String>),
     Audio(Vec<i16>),
 }
 
@@ -280,6 +280,9 @@ async fn process(
 
             match output {
                 Input::String(ref s) => {
+                    yield Ok(StreamData::Text(vec![s.clone()]));
+                }
+                Input::ArrayString(ref s) => {
                     yield Ok(StreamData::Text(s.clone()));
                 }
                 _ => {}
@@ -316,7 +319,7 @@ async fn process(
         match output {
             Ok(StreamData::Text(text)) => {
                 if query.text {
-                    texts.push(text);
+                    texts.extend(text);
                 }
             }
             Ok(StreamData::Audio(output)) => bytes.extend(output),
