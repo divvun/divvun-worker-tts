@@ -229,8 +229,11 @@ async fn process(
     let mut speech_pipeline = match holder
         .speech
         .create(serde_json::json!({
-            "language": query.language,
-            "speaker": query.speaker,
+            "tts": 
+            {
+                "language": query.language,
+                "speaker": query.speaker,
+            }
         }))
         .await
     {
@@ -246,14 +249,14 @@ async fn process(
 
     let mut config = serde_json::json!({});
 
-    if let Some(country) = country {
-        config.as_object_mut().unwrap().insert(
-            "streamcmd-value".to_string(),
-            serde_json::json!({
-                "country": country,
-            }),
-        );
-    }
+    // if let Some(country) = country {
+    //     config.as_object_mut().unwrap().insert(
+    //         "streamcmd-value".to_string(),
+    //         serde_json::json!({
+    //             "country": country,
+    //         }),
+    //     );
+    // }
 
     let mut text_pipeline = match text.create(config).await {
         Ok(pipeline) => pipeline,
