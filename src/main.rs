@@ -229,7 +229,7 @@ async fn process(
     let mut speech_pipeline = match holder
         .speech
         .create(serde_json::json!({
-            "tts": 
+            "tts":
             {
                 "language": query.language,
                 "speaker": query.speaker,
