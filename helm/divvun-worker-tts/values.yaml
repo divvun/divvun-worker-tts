@@ -23,11 +23,11 @@ service:
 
 resources:
   requests:
-    memory: "2Gi"
-    cpu: "500m"
-  limits:
     memory: "8Gi"
-    cpu: "4000m"
+    cpu: "3000m"
+  limits:
+    memory: "12Gi"
+    cpu: "6000m"
 
 livenessProbe:
   httpGet:
