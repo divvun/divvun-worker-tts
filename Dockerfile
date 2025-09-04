@@ -36,7 +36,7 @@ COPY src/ ./src/
 ENV LIBTORCH=/usr
 ENV LIBTORCH_BYPASS_VERSION_CHECK=1
 ENV LZMA_API_STATIC=1
-RUN cargo build --release
+RUN cargo build --release --features mp3
 
 # Runtime stage
 FROM debian:trixie-slim

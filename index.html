@@ -75,7 +75,7 @@ async function speak(text) {
 
     const headers = { "Content-Type": "application/json" }
     if (isMp3) {
-        headers["Accepts"] = "audio/mpeg"
+        headers["Accept"] = "audio/mpeg"
     }
 
     const response = await fetch(location.href + "?text=true", {
