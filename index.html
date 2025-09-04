@@ -31,6 +31,11 @@ Speak
 
 <details>
     <summary>Advanced</summary>
+    <div>
+        <label>Use MP3
+            <input id="use-mp3" type="checkbox">
+        </label>
+    </div>
     <label>
         Country detection behaviour
         <select id="country-dropdown">
@@ -58,6 +63,7 @@ async function speak(text) {
     const audio = document.querySelector(".audio")
     const countryDropdown = document.getElementById("country-dropdown")
     const countryCodeInput = document.getElementById("country-code")
+    const isMp3 = document.getElementById("use-mp3").checked
 
     const body = { text }
 
@@ -67,9 +73,14 @@ async function speak(text) {
         body.country = countryCodeInput.value?.trim().toUpperCase() ?? ""
     }
 
+    const headers = { "Content-Type": "application/json" }
+    if (isMp3) {
+        headers["Accepts"] = "audio/mpeg"
+    }
+
     const response = await fetch(location.href + "?text=true", {
         method: "POST",
-        headers: {"Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
     })
 
