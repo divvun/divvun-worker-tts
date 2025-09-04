@@ -13,17 +13,17 @@ build-linux:
     rm -rf {{tmp}}
 
 
-build-macos:
+build-macos features="mp3":
     # Workaround for macOS eagerly linking dylibs no matter what we tell it
-    mkdir -p {{tmp}}/lib
-    ln -s /opt/homebrew/opt/icu4c/lib/*.a {{tmp}}/lib
-    ln -s /opt/libtorch/lib/*.a {{tmp}}/lib
+    # mkdir -p {{tmp}}/lib
+    # ln -s /opt/homebrew/opt/icu4c/lib/*.a {{tmp}}/lib
+    # ln -s /opt/libtorch/lib/*.a {{tmp}}/lib
     LZMA_API_STATIC=1 \
-        TMP_PATH={{tmp}} \
-        LIBTORCH=/opt/libtorch \
+        # TMP_PATH={{tmp}} \
+        LIBTORCH=/opt/homebrew \
         LIBTORCH_BYPASS_VERSION_CHECK=1 \
-        cargo build --release
-    install_name_tool -add_rpath /opt/libtorch/lib ./target/release/divvun-worker-tts
+        cargo build --release --features {{features}}
+    install_name_tool -add_rpath /opt/homebrew/lib ./target/release/divvun-worker-tts
     rm -rf {{tmp}}
 
 build-docker:

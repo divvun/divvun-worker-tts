@@ -21,6 +21,9 @@ use poem::{
     web::{Data, Html, Json, Query},
 };
 
+#[cfg(feature = "mp3")]
+use mp3lame_encoder::{Builder, FlushNoGap};
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -196,6 +199,39 @@ async fn derive_country(request: &Request) -> Option<String> {
     None
 }
 
+#[cfg(feature = "mp3")]
+fn convert_to_mp3(samples: &[i16], channels: u16, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
+    let mut encoder = Builder::new()?
+        .set_num_channels(channels as u8)?
+        .set_sample_rate(sample_rate)?
+        .set_brate(mp3lame_encoder::Bitrate::Kbps128)?
+        .set_quality(mp3lame_encoder::Quality::Good)?
+        .build()?;
+
+    let mut mp3_buffer = Vec::new();
+
+    // Convert i16 samples to f32 for the encoder
+    let float_samples: Vec<f32> = samples.iter().map(|&s| s as f32 / 32768.0).collect();
+
+    // Encode the audio data
+    if channels == 1 {
+        let mp3_data = encoder.encode(&float_samples)?;
+        mp3_buffer.extend(mp3_data);
+    } else {
+        // For stereo, we need to deinterleave the samples
+        let left: Vec<f32> = float_samples.iter().step_by(2).cloned().collect();
+        let right: Vec<f32> = float_samples.iter().skip(1).step_by(2).cloned().collect();
+        let mp3_data = encoder.encode_stereo(&left, &right)?;
+        mp3_buffer.extend(mp3_data);
+    }
+
+    // Flush remaining data
+    let mp3_data = encoder.flush::<FlushNoGap>()?;
+    mp3_buffer.extend(mp3_data);
+
+    Ok(mp3_buffer)
+}
+
 enum StreamData {
     Text(Vec<String>),
     Audio(Vec<i16>),
@@ -351,29 +387,65 @@ async fn process(
         sample_format: hound::SampleFormat::Int,
     };
 
-    let out = Vec::with_capacity(bytes.len() / 2 + 1);
-    let mut out = std::io::Cursor::new(out);
+    // Check if client accepts MP3
+    let wants_mp3 = req
+        .header("Accept")
+        .map(|accept| accept.contains("audio/mpeg"))
+        .unwrap_or(false);
 
-    let mut writer = hound::WavWriter::new(&mut out, spec).unwrap();
-    for data in bytes {
-        writer.write_sample(data).unwrap();
-    }
-
-    drop(writer);
+    let (content_type, output_data) = if wants_mp3 {
+        // Convert to MP3 if feature is enabled and client wants it
+        #[cfg(feature = "mp3")]
+        {
+            match convert_to_mp3(&bytes, spec.channels, spec.sample_rate) {
+                Ok(mp3_data) => ("audio/mpeg", mp3_data),
+                Err(e) => {
+                    tracing::error!("Failed to encode MP3: {}", e);
+                    return Json(serde_json::json!({
+                        "error": format!("MP3 encoding failed: {}", e)
+                    }))
+                    .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .into_response();
+                }
+            }
+        }
+        #[cfg(not(feature = "mp3"))]
+        {
+            // MP3 feature not enabled, fall back to WAV
+            let out = Vec::with_capacity(bytes.len() / 2 + 1);
+            let mut out = std::io::Cursor::new(out);
+            let mut writer = hound::WavWriter::new(&mut out, spec).unwrap();
+            for data in bytes {
+                writer.write_sample(data).unwrap();
+            }
+            drop(writer);
+            ("audio/wav", out.into_inner())
+        }
+    } else {
+        // Client wants WAV or no specific preference
+        let out = Vec::with_capacity(bytes.len() / 2 + 1);
+        let mut out = std::io::Cursor::new(out);
+        let mut writer = hound::WavWriter::new(&mut out, spec).unwrap();
+        for data in bytes {
+            writer.write_sample(data).unwrap();
+        }
+        drop(writer);
+        ("audio/wav", out.into_inner())
+    };
 
     let time = time_start.elapsed().as_millis();
 
-    let out = out.into_inner();
     tracing::info!(
         time_ms = time,
         language = query.language,
         speaker = query.speaker,
+        format = content_type,
         "generated {} bytes.",
-        out.len()
+        output_data.len()
     );
 
     let mut response = Response::builder()
-        .header("Content-Type", "audio/wav")
+        .header("Content-Type", content_type)
         .header("X-Divvun-Language", query.language.to_string())
         .header("X-Divvun-Voice", query.speaker.to_string());
 
@@ -390,7 +462,7 @@ async fn process(
         response = response.header("X-Divvun-Text", encoded_text);
     }
 
-    response.body(out).into_response()
+    response.body(output_data).into_response()
 }
 
 const PAGE: &str = include_str!("../index.html");
