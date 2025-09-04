@@ -90,7 +90,7 @@ async function speak(text) {
     }
 
     const buffer = await response.arrayBuffer()
-    const blob = new Blob([buffer], { type: "audio/wav" });
+    const blob = new Blob([buffer], { type: isMp3 ? "audio/mpeg" : "audio/wav" });
     audio.src = URL.createObjectURL(blob);
     audio.play()
 }
