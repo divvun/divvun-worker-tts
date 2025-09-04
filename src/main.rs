@@ -201,33 +201,75 @@ async fn derive_country(request: &Request) -> Option<String> {
 
 #[cfg(feature = "mp3")]
 fn convert_to_mp3(samples: &[i16], channels: u16, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
-    let mut encoder = Builder::new()?
-        .set_num_channels(channels as u8)?
-        .set_sample_rate(sample_rate)?
-        .set_brate(mp3lame_encoder::Bitrate::Kbps128)?
-        .set_quality(mp3lame_encoder::Quality::Good)?
-        .build()?;
+    use mp3lame_encoder::{Bitrate, DualPcm, InterleavedPcm, Quality};
+    use std::mem::MaybeUninit;
+
+    let mut builder =
+        Builder::new().ok_or_else(|| anyhow::anyhow!("Failed to create MP3 encoder builder"))?;
+
+    builder
+        .set_num_channels(channels as u8)
+        .map_err(|e| anyhow::anyhow!("Failed to set channels: {:?}", e))?;
+
+    builder
+        .set_sample_rate(sample_rate)
+        .map_err(|e| anyhow::anyhow!("Failed to set sample rate: {:?}", e))?;
+
+    builder
+        .set_brate(Bitrate::Kbps128)
+        .map_err(|e| anyhow::anyhow!("Failed to set bitrate: {:?}", e))?;
+
+    builder
+        .set_quality(Quality::Good)
+        .map_err(|e| anyhow::anyhow!("Failed to set quality: {:?}", e))?;
+
+    let mut encoder = builder
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build MP3 encoder: {:?}", e))?;
 
     let mut mp3_buffer = Vec::new();
-
-    // Convert i16 samples to f32 for the encoder
-    let float_samples: Vec<f32> = samples.iter().map(|&s| s as f32 / 32768.0).collect();
+    let mut output_buf = [MaybeUninit::uninit(); 8192];
 
     // Encode the audio data
     if channels == 1 {
-        let mp3_data = encoder.encode(&float_samples)?;
-        mp3_buffer.extend(mp3_data);
+        // For mono, we can use InterleavedPcm directly with i16 samples
+        let input = InterleavedPcm(samples);
+        let bytes_written = encoder
+            .encode(input, &mut output_buf)
+            .map_err(|e| anyhow::anyhow!("Failed to encode MP3 data: {:?}", e))?;
+
+        // Safety: encoder.encode() initializes the first bytes_written elements
+        let mp3_data: &[u8] =
+            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
+        mp3_buffer.extend_from_slice(mp3_data);
     } else {
-        // For stereo, we need to deinterleave the samples
-        let left: Vec<f32> = float_samples.iter().step_by(2).cloned().collect();
-        let right: Vec<f32> = float_samples.iter().skip(1).step_by(2).cloned().collect();
-        let mp3_data = encoder.encode_stereo(&left, &right)?;
-        mp3_buffer.extend(mp3_data);
+        // For stereo, deinterleave the samples
+        let left: Vec<i16> = samples.iter().step_by(2).cloned().collect();
+        let right: Vec<i16> = samples.iter().skip(1).step_by(2).cloned().collect();
+
+        let input = DualPcm {
+            left: &left,
+            right: &right,
+        };
+        let bytes_written = encoder
+            .encode(input, &mut output_buf)
+            .map_err(|e| anyhow::anyhow!("Failed to encode stereo MP3 data: {:?}", e))?;
+
+        // Safety: encoder.encode() initializes the first bytes_written elements
+        let mp3_data: &[u8] =
+            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
+        mp3_buffer.extend_from_slice(mp3_data);
     }
 
     // Flush remaining data
-    let mp3_data = encoder.flush::<FlushNoGap>()?;
-    mp3_buffer.extend(mp3_data);
+    let bytes_written = encoder
+        .flush::<FlushNoGap>(&mut output_buf)
+        .map_err(|e| anyhow::anyhow!("Failed to flush MP3 encoder: {:?}", e))?;
+
+    // Safety: encoder.flush() initializes the first bytes_written elements
+    let mp3_data: &[u8] =
+        unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
+    mp3_buffer.extend_from_slice(mp3_data);
 
     Ok(mp3_buffer)
 }
@@ -245,7 +287,7 @@ async fn process(
     req: &Request,
 ) -> impl IntoResponse {
     let time_start = std::time::Instant::now();
-    let country = match body.country.as_deref() {
+    let _country = match body.country.as_deref() {
         Some("") => None,
         Some(v) => Some(v.to_string()),
         None => derive_country(req).await,

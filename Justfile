@@ -19,7 +19,6 @@ build-macos features="mp3":
     # ln -s /opt/homebrew/opt/icu4c/lib/*.a {{tmp}}/lib
     # ln -s /opt/libtorch/lib/*.a {{tmp}}/lib
     LZMA_API_STATIC=1 \
-        # TMP_PATH={{tmp}} \
         LIBTORCH=/opt/homebrew \
         LIBTORCH_BYPASS_VERSION_CHECK=1 \
         cargo build --release --features {{features}}
