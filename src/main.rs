@@ -202,7 +202,6 @@ async fn derive_country(request: &Request) -> Option<String> {
 #[cfg(feature = "mp3")]
 fn convert_to_mp3(samples: &[i16], _channels: u16, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
     use mp3lame_encoder::{Bitrate, InterleavedPcm, Quality};
-    use std::mem::MaybeUninit;
 
     let mut builder =
         Builder::new().ok_or_else(|| anyhow::anyhow!("Failed to create MP3 encoder builder"))?;
@@ -228,36 +227,23 @@ fn convert_to_mp3(samples: &[i16], _channels: u16, sample_rate: u32) -> anyhow::
         .map_err(|e| anyhow::anyhow!("Failed to build MP3 encoder: {:?}", e))?;
 
     let mut mp3_buffer = Vec::new();
-    let mut output_buf = [MaybeUninit::uninit(); 8192];
 
-    // Process samples in chunks to ensure all audio is encoded
-    const CHUNK_SIZE: usize = 4096; // Process 4096 samples at a time
-
-    for chunk in samples.chunks(CHUNK_SIZE) {
-        let input = InterleavedPcm(chunk);
-        let bytes_written = encoder
-            .encode(input, &mut output_buf)
-            .map_err(|e| anyhow::anyhow!("Failed to encode MP3 data: {:?}", e))?;
-
-        if bytes_written > 0 {
-            // Safety: encoder.encode() initializes the first bytes_written elements
-            let mp3_data: &[u8] = unsafe {
-                std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written)
-            };
-            mp3_buffer.extend_from_slice(mp3_data);
-        }
+    // Encode all samples at once using proper buffer sizing from documentation
+    let input = InterleavedPcm(samples);
+    mp3_buffer.reserve(mp3lame_encoder::max_required_buffer_size(samples.len()));
+    let encoded_size = encoder
+        .encode(input, mp3_buffer.spare_capacity_mut())
+        .map_err(|e| anyhow::anyhow!("Failed to encode MP3 data: {:?}", e))?;
+    unsafe {
+        mp3_buffer.set_len(mp3_buffer.len().wrapping_add(encoded_size));
     }
 
     // Flush remaining data
-    let bytes_written = encoder
-        .flush::<FlushNoGap>(&mut output_buf)
+    let encoded_size = encoder
+        .flush::<FlushNoGap>(mp3_buffer.spare_capacity_mut())
         .map_err(|e| anyhow::anyhow!("Failed to flush MP3 encoder: {:?}", e))?;
-
-    if bytes_written > 0 {
-        // Safety: encoder.flush() initializes the first bytes_written elements
-        let mp3_data: &[u8] =
-            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
-        mp3_buffer.extend_from_slice(mp3_data);
+    unsafe {
+        mp3_buffer.set_len(mp3_buffer.len().wrapping_add(encoded_size));
     }
 
     Ok(mp3_buffer)
