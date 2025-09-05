@@ -200,15 +200,15 @@ async fn derive_country(request: &Request) -> Option<String> {
 }
 
 #[cfg(feature = "mp3")]
-fn convert_to_mp3(samples: &[i16], channels: u16, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
-    use mp3lame_encoder::{Bitrate, DualPcm, InterleavedPcm, Quality};
+fn convert_to_mp3(samples: &[i16], _channels: u16, sample_rate: u32) -> anyhow::Result<Vec<u8>> {
+    use mp3lame_encoder::{Bitrate, InterleavedPcm, Quality};
     use std::mem::MaybeUninit;
 
     let mut builder =
         Builder::new().ok_or_else(|| anyhow::anyhow!("Failed to create MP3 encoder builder"))?;
 
     builder
-        .set_num_channels(channels as u8)
+        .set_num_channels(1) // Audio is always mono
         .map_err(|e| anyhow::anyhow!("Failed to set channels: {:?}", e))?;
 
     builder
@@ -230,35 +230,22 @@ fn convert_to_mp3(samples: &[i16], channels: u16, sample_rate: u32) -> anyhow::R
     let mut mp3_buffer = Vec::new();
     let mut output_buf = [MaybeUninit::uninit(); 8192];
 
-    // Encode the audio data
-    if channels == 1 {
-        // For mono, we can use InterleavedPcm directly with i16 samples
-        let input = InterleavedPcm(samples);
+    // Process samples in chunks to ensure all audio is encoded
+    const CHUNK_SIZE: usize = 4096; // Process 4096 samples at a time
+
+    for chunk in samples.chunks(CHUNK_SIZE) {
+        let input = InterleavedPcm(chunk);
         let bytes_written = encoder
             .encode(input, &mut output_buf)
             .map_err(|e| anyhow::anyhow!("Failed to encode MP3 data: {:?}", e))?;
 
-        // Safety: encoder.encode() initializes the first bytes_written elements
-        let mp3_data: &[u8] =
-            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
-        mp3_buffer.extend_from_slice(mp3_data);
-    } else {
-        // For stereo, deinterleave the samples
-        let left: Vec<i16> = samples.iter().step_by(2).cloned().collect();
-        let right: Vec<i16> = samples.iter().skip(1).step_by(2).cloned().collect();
-
-        let input = DualPcm {
-            left: &left,
-            right: &right,
-        };
-        let bytes_written = encoder
-            .encode(input, &mut output_buf)
-            .map_err(|e| anyhow::anyhow!("Failed to encode stereo MP3 data: {:?}", e))?;
-
-        // Safety: encoder.encode() initializes the first bytes_written elements
-        let mp3_data: &[u8] =
-            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
-        mp3_buffer.extend_from_slice(mp3_data);
+        if bytes_written > 0 {
+            // Safety: encoder.encode() initializes the first bytes_written elements
+            let mp3_data: &[u8] = unsafe {
+                std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written)
+            };
+            mp3_buffer.extend_from_slice(mp3_data);
+        }
     }
 
     // Flush remaining data
@@ -266,10 +253,12 @@ fn convert_to_mp3(samples: &[i16], channels: u16, sample_rate: u32) -> anyhow::R
         .flush::<FlushNoGap>(&mut output_buf)
         .map_err(|e| anyhow::anyhow!("Failed to flush MP3 encoder: {:?}", e))?;
 
-    // Safety: encoder.flush() initializes the first bytes_written elements
-    let mp3_data: &[u8] =
-        unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
-    mp3_buffer.extend_from_slice(mp3_data);
+    if bytes_written > 0 {
+        // Safety: encoder.flush() initializes the first bytes_written elements
+        let mp3_data: &[u8] =
+            unsafe { std::slice::from_raw_parts(output_buf.as_ptr() as *const u8, bytes_written) };
+        mp3_buffer.extend_from_slice(mp3_data);
+    }
 
     Ok(mp3_buffer)
 }
