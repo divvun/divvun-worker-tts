@@ -16,7 +16,7 @@ divvun-runtime = { git = "https://github.com/divvun/divvun-runtime.git", default
 futures-util = "0.3.31"
 geoipd = { git = "https://github.com/necessary-nu/geoipd", version = "1.0.0" }
 hound = "3.5.1"
-mp3lame-encoder = { version = "0.1", optional = true }
+mp3lame-encoder = { version = "0.2.1", optional = true }
 poem = "3.0.1"
 serde = "1.0.203"
 serde_json = "1.0.117"
