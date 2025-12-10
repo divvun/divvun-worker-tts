@@ -55,6 +55,7 @@ export function getEnvVars(target?: string): Record<string, string> {
     CG3_SYSROOT: sysroot,
     EXECUTORCH_SYSROOT: sysroot,
     EXECUTORCH_SRC: srcroot,
+    BUILD_ROOT: path.join(import.meta.dirname ?? "", ".."),
   };
 
   // Use clang-cl on Windows for C/C++ compilation
