@@ -13,14 +13,7 @@ use divvun_runtime::{bundle::Bundle, modules::Input};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
 use poem::{
-    EndpointExt, Request, Response, Route, Server,
-    error::ResponseError,
-    get, handler,
-    http::StatusCode,
-    listener::{TcpListener, UnixListener},
-    middleware::{Cors, Tracing},
-    post,
-    web::{Data, Html, Json, Query},
+    EndpointExt, IntoResponse, Request, Response, Route, Server, error::ResponseError, get, handler, http::StatusCode, listener::{TcpListener, UnixListener}, middleware::{Cors, Tracing}, post, web::{Data, Html, Json, Query}
 };
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
