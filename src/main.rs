@@ -9,7 +9,7 @@ use std::{
 
 use base64::prelude::*;
 use clap::Parser;
-use divvun_runtime::{Bundle, modules::Input};
+use divvun_runtime::{bundle::Bundle, modules::Input};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
 use poem::{
