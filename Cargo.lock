@@ -708,6 +708,7 @@ dependencies = [
 [[package]]
 name = "divvun-runtime"
 version = "0.4.0"
+source = "git+https://github.com/divvun/divvun-runtime.git#ac0f24b83b5da9a861ad32d5c5f00f6d98c6e0a4"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -753,6 +754,7 @@ dependencies = [
 [[package]]
 name = "divvun-runtime-macros"
 version = "0.4.0"
+source = "git+https://github.com/divvun/divvun-runtime.git#ac0f24b83b5da9a861ad32d5c5f00f6d98c6e0a4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2697,6 +2699,7 @@ dependencies = [
 [[package]]
 name = "syntax-highlight"
 version = "0.1.0"
+source = "git+https://github.com/divvun/divvun-runtime.git#ac0f24b83b5da9a861ad32d5c5f00f6d98c6e0a4"
 dependencies = [
  "once_cell",
  "syntect",
