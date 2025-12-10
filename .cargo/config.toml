@@ -2,10 +2,10 @@
 git-fetch-with-cli = true
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-Clinker-features=-lld"]
+rustflags = ["-Clinker-feature=-lld"]
 
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-Clinker-features=-lld"]
+rustflags = ["-Clinker-feature=-lld"]
 
 [target.x86_64-pc-windows-msvc]
 linker = "lld-link"

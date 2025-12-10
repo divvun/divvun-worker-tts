@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr as _,
     sync::Arc,
 };
@@ -13,13 +13,16 @@ use divvun_runtime::{bundle::Bundle, modules::Input};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
 use poem::{
-    EndpointExt, IntoResponse, Request, Response, Route, Server, get, handler,
+    EndpointExt, Request, Response, Route, Server,
+    error::ResponseError,
+    get, handler,
     http::StatusCode,
     listener::{TcpListener, UnixListener},
-    middleware::Cors,
+    middleware::{Cors, Tracing},
     post,
     web::{Data, Html, Json, Query},
 };
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[cfg(feature = "mp3")]
 use mp3lame_encoder::{Builder, FlushNoGap};
@@ -268,13 +271,62 @@ enum StreamData {
     Audio(Vec<i16>),
 }
 
+#[derive(Debug)]
+pub enum AppError {
+    LanguageNotFound(usize),
+    PipelineCreation(String),
+    TextProcessing(String),
+    SpeechSynthesis(String),
+    WavProcessing(String),
+    AudioEncoding(String),
+    NoOutput,
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LanguageNotFound(id) => write!(f, "Language {} not found", id),
+            Self::PipelineCreation(e) => write!(f, "Pipeline creation failed: {}", e),
+            Self::TextProcessing(e) => write!(f, "Text processing failed: {}", e),
+            Self::SpeechSynthesis(e) => write!(f, "Speech synthesis failed: {}", e),
+            Self::WavProcessing(e) => write!(f, "WAV processing failed: {}", e),
+            Self::AudioEncoding(e) => write!(f, "Audio encoding failed: {}", e),
+            Self::NoOutput => write!(f, "No audio output generated"),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
+
+impl ResponseError for AppError {
+    fn status(&self) -> StatusCode {
+        match self {
+            Self::LanguageNotFound(_) => StatusCode::BAD_REQUEST,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn as_response(&self) -> Response {
+        if self.status().is_server_error() {
+            tracing::error!(error = %self, "Server error");
+        } else {
+            tracing::warn!(error = %self, "Client error");
+        }
+
+        Response::builder()
+            .status(self.status())
+            .content_type("application/json")
+            .body(serde_json::json!({"error": self.to_string()}).to_string())
+    }
+}
+
 #[handler]
 async fn process(
     Data(holder): Data<&Arc<PipelineHolder>>,
     Query(query): Query<ProcessQuery>,
     Json(body): Json<ProcessInput>,
     req: &Request,
-) -> impl IntoResponse {
+) -> Result<Response, AppError> {
     let time_start = std::time::Instant::now();
     let _country = match body.country.as_deref() {
         Some("") => None,
@@ -282,18 +334,12 @@ async fn process(
         None => derive_country(req).await,
     };
 
-    let text = match holder.text.get(&query.language) {
-        Some(text) => text,
-        None => {
-            return Json(serde_json::json!({
-                "error": "Language not found".to_string()
-            }))
-            .with_status(StatusCode::BAD_REQUEST)
-            .into_response();
-        }
-    };
+    let text = holder
+        .text
+        .get(&query.language)
+        .ok_or(AppError::LanguageNotFound(query.language))?;
 
-    let mut speech_pipeline = match holder
+    let mut speech_pipeline = holder
         .speech
         .create(serde_json::json!({
             "tts":
@@ -303,38 +349,14 @@ async fn process(
             }
         }))
         .await
-    {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            return Json(serde_json::json!({
-                "error": e.to_string()
-            }))
-            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-            .into_response();
-        }
-    };
+        .map_err(|e| AppError::PipelineCreation(e.to_string()))?;
 
     let mut config = serde_json::json!({});
 
-    // if let Some(country) = country {
-    //     config.as_object_mut().unwrap().insert(
-    //         "streamcmd-value".to_string(),
-    //         serde_json::json!({
-    //             "country": country,
-    //         }),
-    //     );
-    // }
-
-    let mut text_pipeline = match text.create(config).await {
-        Ok(pipeline) => pipeline,
-        Err(e) => {
-            return Json(serde_json::json!({
-                "error": e.to_string()
-            }))
-            .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-            .into_response();
-        }
-    };
+    let mut text_pipeline = text
+        .create(config)
+        .await
+        .map_err(|e| AppError::TextProcessing(e.to_string()))?;
 
     let mut stream = text_pipeline
         .forward(Input::String(body.text.clone()))
@@ -366,8 +388,30 @@ async fn process(
             for output in inner_stream.next().await {
                 match output {
                     Ok(output) => {
-                        let output = output.try_into_bytes().unwrap();
-                        let mut reader = hound::WavReader::new(std::io::Cursor::new(output)).unwrap();
+                        let output = match output.try_into_bytes() {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                yield Err(divvun_runtime::modules::Error(format!("Failed to convert output to bytes: {:?}", e)));
+                                return;
+                            }
+                        };
+                        tracing::debug!(
+                            len = output.len(),
+                            header = ?output.get(0..12).map(|h| String::from_utf8_lossy(h).to_string()),
+                            "Speech pipeline output"
+                        );
+                        let mut reader = match hound::WavReader::new(std::io::Cursor::new(output.clone())) {
+                            Ok(reader) => reader,
+                            Err(e) => {
+                                tracing::error!(
+                                    len = output.len(),
+                                    header_hex = ?output.get(0..44).map(hex::encode),
+                                    "Failed to parse WAV: {}", e
+                                );
+                                yield Err(divvun_runtime::modules::Error(format!("Failed to read WAV data: {}", e)));
+                                return;
+                            }
+                        };
                         let samples = reader.samples::<i16>().collect::<Result<Vec<_>, _>>();
                         let samples = match samples {
                             Ok(samples) => samples,
@@ -397,20 +441,13 @@ async fn process(
             }
             Ok(StreamData::Audio(output)) => bytes.extend(output),
             Err(e) => {
-                return Json(serde_json::json!({
-                    "error": e.to_string()
-                }))
-                .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-                .into_response();
+                return Err(AppError::SpeechSynthesis(e.to_string()));
             }
         }
     }
 
     if bytes.is_empty() {
-        return Json(serde_json::json!({
-            "error": "No output"
-        }))
-        .into_response();
+        return Err(AppError::NoOutput);
     }
 
     let spec = hound::WavSpec {
@@ -430,26 +467,18 @@ async fn process(
         // Convert to MP3 if feature is enabled and client wants it
         #[cfg(feature = "mp3")]
         {
-            match convert_to_mp3(&bytes, &body.text) {
-                Ok(mp3_data) => ("audio/mpeg", mp3_data),
-                Err(e) => {
-                    tracing::error!("Failed to encode MP3: {}", e);
-                    return Json(serde_json::json!({
-                        "error": format!("MP3 encoding failed: {}", e)
-                    }))
-                    .with_status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .into_response();
-                }
-            }
+            let mp3_data = convert_to_mp3(&bytes, &body.text)
+                .map_err(|e| AppError::AudioEncoding(e.to_string()))?;
+            ("audio/mpeg", mp3_data)
         }
         #[cfg(not(feature = "mp3"))]
         {
             // MP3 feature not enabled, fall back to WAV
             let out = Vec::with_capacity(bytes.len() / 2 + 1);
             let mut out = std::io::Cursor::new(out);
-            let mut writer = hound::WavWriter::new(&mut out, spec).unwrap();
+            let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
             for data in bytes {
-                writer.write_sample(data).unwrap();
+                writer.write_sample(data).expect("Vec write infallible");
             }
             drop(writer);
             ("audio/wav", out.into_inner())
@@ -458,9 +487,9 @@ async fn process(
         // Client wants WAV or no specific preference
         let out = Vec::with_capacity(bytes.len() / 2 + 1);
         let mut out = std::io::Cursor::new(out);
-        let mut writer = hound::WavWriter::new(&mut out, spec).unwrap();
+        let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
         for data in bytes {
-            writer.write_sample(data).unwrap();
+            writer.write_sample(data).expect("Vec write infallible");
         }
         drop(writer);
         ("audio/wav", out.into_inner())
@@ -495,7 +524,7 @@ async fn process(
         response = response.header("X-Divvun-Text", encoded_text);
     }
 
-    response.body(output_data).into_response()
+    Ok(response.body(output_data))
 }
 
 const PAGE: &str = include_str!("../index.html");
@@ -520,8 +549,17 @@ struct PipelineHolder {
     text: HashMap<usize, Bundle>,
 }
 
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_file(true).with_line_number(true))
+        .with(filter)
+        .init();
+}
+
 async fn run() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    init_tracing();
 
     let args = Args::parse();
 
@@ -532,7 +570,11 @@ async fn run() -> anyhow::Result<()> {
         (config_path, speech_bundle_path, args.bundle_path.clone())
     } else {
         // File mode: use provided bundle file and config
-        let bundle_base_path = args.bundle_path.parent().unwrap().to_path_buf();
+        let bundle_base_path = args
+            .bundle_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
         (
             args.config_path.clone(),
             args.bundle_path.clone(),
@@ -572,7 +614,8 @@ async fn run() -> anyhow::Result<()> {
         .at("/health", get(health_get))
         .data(Arc::new(holder))
         .data_opt(geoip)
-        .with(Cors::default());
+        .with(Cors::default())
+        .with(Tracing);
 
     let address = ListenerAddress::parse(&args.address)?;
 

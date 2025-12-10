@@ -784,6 +784,7 @@ dependencies = [
  "divvun-runtime",
  "futures-util",
  "geoipd",
+ "hex",
  "hound",
  "mp3lame-encoder",
  "poem",
@@ -1261,6 +1262,12 @@ name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hfst"
@@ -1741,6 +1748,15 @@ name = "malloced"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dfebb2f9e0b39509c62eead6ec7ae0c0ed45bb61d12bbcf4e976c566c5400ec"
+
+[[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
 
 [[package]]
 name = "matches"
@@ -3061,10 +3077,14 @@ version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f30143827ddab0d256fd843b7a66d164e9f271cfa0dde49142c5ca0ca291f1e"
 dependencies = [
+ "matchers",
  "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-log",
 ]
