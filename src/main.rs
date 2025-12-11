@@ -13,7 +13,14 @@ use divvun_runtime::{bundle::Bundle, modules::Input};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
 use poem::{
-    EndpointExt, IntoResponse, Request, Response, Route, Server, error::ResponseError, get, handler, http::StatusCode, listener::{TcpListener, UnixListener}, middleware::{Cors, Tracing}, post, web::{Data, Html, Json, Query}
+    EndpointExt, IntoResponse, Request, Response, Route, Server,
+    error::ResponseError,
+    get, handler,
+    http::StatusCode,
+    listener::{TcpListener, UnixListener},
+    middleware::{Cors, Tracing},
+    post,
+    web::{Data, Html, Json, Query},
 };
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
@@ -416,6 +423,7 @@ async fn process(
                         yield Ok(StreamData::Audio(samples));
                     }
                     Err(e) => {
+                        tracing::error!(error = %e, "Speech pipeline returned error");
                         yield Err(e);
                     }
                 }
