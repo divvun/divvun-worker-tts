@@ -203,7 +203,7 @@ async fn derive_country(request: &Request) -> Option<String> {
 }
 
 #[cfg(feature = "mp3")]
-fn convert_to_mp3(samples: &[i16], text: &str) -> anyhow::Result<Vec<u8>> {
+fn convert_to_mp3(samples: &[f32], text: &str) -> anyhow::Result<Vec<u8>> {
     use mp3lame_encoder::{Bitrate, Id3Tag, MonoPcm, Quality};
 
     const TARGET_SAMPLE_RATE: u32 = 22050;
@@ -268,7 +268,7 @@ fn convert_to_mp3(samples: &[i16], text: &str) -> anyhow::Result<Vec<u8>> {
 
 enum StreamData {
     Text(Vec<String>),
-    Audio(Vec<i16>),
+    Audio(Vec<f32>),
 }
 
 #[derive(Debug)]
@@ -412,7 +412,7 @@ async fn process(
                                 return;
                             }
                         };
-                        let samples = reader.samples::<i16>().collect::<Result<Vec<_>, _>>();
+                        let samples = reader.samples::<f32>().collect::<Result<Vec<_>, _>>();
                         let samples = match samples {
                             Ok(samples) => samples,
                             Err(e) => {
