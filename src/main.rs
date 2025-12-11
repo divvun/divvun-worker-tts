@@ -454,8 +454,8 @@ async fn process(
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: 22050,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
     };
 
     // Check if client accepts MP3
