@@ -47,14 +47,18 @@ struct Args {
 
     #[arg(long, env = "MAXMIND_LICENSE_KEY")]
     maxmind_license_key: Option<String>,
+
+    /// Show voice selector in web UI (for multi-voice deployments)
+    #[arg(long, env = "MULTI_VOICE")]
+    multi_voice: bool,
 }
 
 type Config = HashMap<String, VoiceConfig>;
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct VoiceConfig {
+    name: String,
     language: usize,
-    #[allow(dead_code)]
-    speakers: Vec<usize>,
+    speakers: HashMap<usize, String>,
 }
 
 #[derive(Debug)]
@@ -114,6 +118,12 @@ struct ProcessQuery {
     language: usize,
     #[serde(default)]
     text: bool,
+    #[serde(default = "default_pace")]
+    pace: f32,
+}
+
+fn default_pace() -> f32 {
+    1.0
 }
 
 pub async fn country_lookup(geoip: &Arc<GeoIpLookup>, request: &Request) -> Option<String> {
@@ -346,6 +356,7 @@ async fn process(
             {
                 "language": query.language,
                 "speaker": query.speaker,
+                "pace": query.pace,
             }
         }))
         .await
@@ -391,7 +402,7 @@ async fn process(
                         let output = match output.try_into_bytes() {
                             Ok(bytes) => bytes,
                             Err(e) => {
-                                yield Err(divvun_runtime::modules::Error(format!("Failed to convert output to bytes: {:?}", e)));
+                                yield Err(divvun_runtime::modules::Error::msg(format!("Failed to convert output to bytes: {:?}", e)));
                                 return;
                             }
                         };
@@ -408,7 +419,7 @@ async fn process(
                                     header_hex = ?output.get(0..44).map(hex::encode),
                                     "Failed to parse WAV: {}", e
                                 );
-                                yield Err(divvun_runtime::modules::Error(format!("Failed to read WAV data: {}", e)));
+                                yield Err(divvun_runtime::modules::Error::msg(format!("Failed to read WAV data: {}", e)));
                                 return;
                             }
                         };
@@ -416,7 +427,7 @@ async fn process(
                         let samples = match samples {
                             Ok(samples) => samples,
                             Err(e) => {
-                                yield Err(divvun_runtime::modules::Error(e.to_string()));
+                                yield Err(divvun_runtime::modules::Error::msg(e.to_string()));
                                 return;
                             }
                         };
@@ -531,8 +542,8 @@ async fn process(
 const PAGE: &str = include_str!("../index.html");
 
 #[handler]
-async fn process_get() -> impl IntoResponse {
-    Html(PAGE).into_response()
+async fn process_get(Data(holder): Data<&Arc<PipelineHolder>>) -> impl IntoResponse {
+    Html(holder.page.clone()).into_response()
 }
 
 #[handler]
@@ -548,6 +559,7 @@ async fn main() -> anyhow::Result<()> {
 struct PipelineHolder {
     speech: Bundle,
     text: HashMap<usize, Bundle>,
+    page: String,
 }
 
 fn init_tracing() {
@@ -589,17 +601,34 @@ async fn run() -> anyhow::Result<()> {
         "Loading speech bundle from {}",
         speech_bundle_path.display()
     );
-    let speech = Bundle::from_bundle(&speech_bundle_path)?;
+    let speech = Bundle::from_bundle(&speech_bundle_path).await?;
+
+    // Generate language options HTML if multi-voice mode
+    let page = if args.multi_voice {
+        let mut language_options = String::new();
+        for (code, voice) in &config {
+            let speakers_json = serde_json::to_string(&voice.speakers)?;
+            language_options.push_str(&format!(
+                r#"<option value="{}" data-speakers='{}'>{} ({})</option>"#,
+                voice.language, speakers_json, voice.name, code
+            ));
+        }
+        PAGE.replace("%LANGUAGE_OPTIONS%", &language_options)
+            .replace("%VOICE_SETTINGS_STYLE%", "")
+    } else {
+        PAGE.replace("%LANGUAGE_OPTIONS%", "")
+            .replace("%VOICE_SETTINGS_STYLE%", "display: none;")
+    };
 
     let mut text = HashMap::new();
 
     for (language, voice_config) in config {
         tracing::info!("Loading text bundle for language {}", language);
-        let bundle = Bundle::from_bundle(bundle_base_path.join(format!("text-{}.drb", language)))?;
+        let bundle = Bundle::from_bundle(bundle_base_path.join(format!("text-{}.drb", language))).await?;
         text.insert(voice_config.language, bundle);
     }
 
-    let holder = PipelineHolder { speech, text };
+    let holder = PipelineHolder { speech, text, page };
 
     let geoip = if let (Some(account_id), Some(license_key)) =
         (args.maxmind_account_id, args.maxmind_license_key)

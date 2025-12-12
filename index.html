@@ -1,129 +1,453 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-<title>Divvun TTS</title>
-<meta charset="utf-8">
-<style>
-.container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-}
-.output {
-    white-space: pre-wrap;
-    max-width: 600px;
-    padding: 16px 8px;
-    background-color: #f7f7f7;
-    width: 100%;
-    font-family: monospace;
-}
-</style>
-</head>
-<body>
-<div class="container">
-<textarea class="text" autofocus></textarea>
-<button class="doit">
-Speak
-</button>
-<audio controls class="audio"></audio>
-<p class="output"></p>
+  <head>
+    <title>Divvun TTS</title>
+    <meta charset="utf-8">
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-<details>
-    <summary>Advanced</summary>
-    <div>
-        <label>Use MP3
-            <input id="use-mp3" type="checkbox">
-        </label>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.6;
+        color: #333;
+        background-color: #f5f5f5;
+        min-height: 100vh;
+      }
+
+      .header {
+        background: #fff;
+        padding: 1rem 2rem;
+        border-bottom: 1px solid #e0e0e0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+
+      .header h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #2c3e50;
+      }
+
+      .main-container {
+        display: grid;
+        grid-template-columns: 1fr 350px;
+        gap: 2rem;
+        padding: 2rem;
+        min-height: calc(100vh - 80px);
+      }
+
+      .left-column {
+        background: #fff;
+        border-radius: 8px;
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .right-column {
+        background: #fff;
+        border-radius: 8px;
+        padding: 2rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+
+      .textarea-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .textarea-container label {
+        font-weight: 500;
+        color: #555;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 200px;
+        padding: 1rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 6px;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 14px;
+        resize: vertical;
+        transition: border-color 0.2s;
+        flex: 1;
+      }
+
+      textarea:focus {
+        outline: none;
+        border-color: #3498db;
+      }
+
+      .run-button {
+        background: #3498db;
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        align-self: flex-start;
+      }
+
+      .run-button:hover {
+        background: #2980b9;
+      }
+
+      .run-button:disabled {
+        background: #bdc3c7;
+        cursor: not-allowed;
+      }
+
+      .audio-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .audio-section label {
+        font-weight: 500;
+        color: #555;
+      }
+
+      audio {
+        width: 100%;
+        border-radius: 6px;
+      }
+
+      .output-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .output-section label {
+        font-weight: 500;
+        color: #555;
+      }
+
+      .output {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 1rem;
+        min-height: 60px;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 14px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 0.5rem;
+      }
+
+      .section-header h3 {
+        margin: 0;
+        color: #2c3e50;
+        font-weight: 600;
+      }
+
+      .settings-group {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .control-group label {
+        font-weight: 500;
+        color: #555;
+      }
+
+      select, input[type="text"] {
+        padding: 0.5rem;
+        border: 2px solid #e0e0e0;
+        border-radius: 4px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+        width: 100%;
+      }
+
+      select:focus, input[type="text"]:focus {
+        outline: none;
+        border-color: #3498db;
+      }
+
+      .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+        cursor: pointer;
+      }
+
+      .checkbox-group:hover {
+        background: #f8f9fa;
+      }
+
+      .checkbox-group label {
+        font-weight: 500;
+        color: #555;
+        cursor: pointer;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: #3498db;
+      }
+
+      .divider {
+        height: 1px;
+        background: #e0e0e0;
+        margin: 0.5rem 0;
+      }
+
+      @media (max-width: 900px) {
+        .main-container {
+          grid-template-columns: 1fr;
+          gap: 1rem;
+          padding: 1rem;
+        }
+
+        .right-column {
+          order: -1;
+        }
+
+        .header {
+          padding: 1rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>Divvun Text-to-Speech</h1>
     </div>
-    <label>
-        Country detection behaviour
-        <select id="country-dropdown">
-            <option value="auto">Auto-detect</option>
-            <option value="force">Force no country</option>
-            <option value="custom">Custom country</option>
-        </select>
-    </label>
-    <div>
-        <input id="country-code" type="text" placeholder="Custom country code">
+
+    <div class="main-container">
+      <div class="left-column">
+        <div class="textarea-container">
+          <label for="text">Enter text to speak:</label>
+          <textarea id="text" class="text" placeholder="Type or paste your text here..." autofocus></textarea>
+        </div>
+
+        <button class="run-button doit">Speak</button>
+
+        <div class="audio-section">
+          <label>Audio Output:</label>
+          <audio controls class="audio"></audio>
+        </div>
+
+        <div class="output-section">
+          <label>Processed Text:</label>
+          <div class="output"></div>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div class="voice-settings" style="%VOICE_SETTINGS_STYLE%">
+          <div class="section-header">
+            <h3>Voice Settings</h3>
+          </div>
+          <div class="settings-group">
+            <div class="control-group">
+              <label for="language">Language:</label>
+              <select id="language">%LANGUAGE_OPTIONS%</select>
+            </div>
+            <div class="control-group">
+              <label for="speaker">Speaker:</label>
+              <select id="speaker"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider" style="%VOICE_SETTINGS_STYLE%"></div>
+
+        <div class="advanced-settings">
+          <div class="section-header">
+            <h3>Advanced</h3>
+          </div>
+          <div class="settings-group">
+            <div class="control-group">
+              <label for="pace">Pace: <span id="pace-value">1.0</span></label>
+              <input type="range" id="pace" min="0.5" max="2.0" step="0.05" value="1.0">
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="use-mp3">
+              <label for="use-mp3">Use MP3 format</label>
+            </div>
+
+            <div class="control-group">
+              <label for="country-dropdown">Country detection:</label>
+              <select id="country-dropdown">
+                <option value="auto">Auto-detect</option>
+                <option value="force">Force no country</option>
+                <option value="custom">Custom country</option>
+              </select>
+            </div>
+
+            <div class="control-group" id="country-code-group" style="display: none;">
+              <label for="country-code">Country code:</label>
+              <input id="country-code" type="text" placeholder="e.g. NO, SE, FI">
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-</details>
-<script>
 
-function fromBinary(encoded) {
-  const binary = atob(encoded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return String.fromCharCode(...new Uint16Array(bytes.buffer));
-}
+    <script>
+      const langSelect = document.getElementById("language");
+      const speakerSelect = document.getElementById("speaker");
 
-async function speak(text) {
-    const audio = document.querySelector(".audio")
-    const countryDropdown = document.getElementById("country-dropdown")
-    const countryCodeInput = document.getElementById("country-code")
-    const isMp3 = document.getElementById("use-mp3").checked
+      function updateSpeakers() {
+        const selected = langSelect.options[langSelect.selectedIndex];
+        const speakers = JSON.parse(selected.dataset.speakers || "{}");
+        speakerSelect.innerHTML = "";
+        Object.entries(speakers).forEach(([id, name]) => {
+          const opt = document.createElement("option");
+          opt.value = id;
+          opt.textContent = name;
+          speakerSelect.appendChild(opt);
+        });
+      }
 
-    const body = { text }
+      langSelect.addEventListener("change", updateSpeakers);
+      updateSpeakers();
 
-    if (countryDropdown.value === "force") {
-        body.country = ""
-    } else if (countryDropdown.value === "custom") {
-        body.country = countryCodeInput.value?.trim().toUpperCase() ?? ""
-    }
+      // Pace slider value display
+      const paceSlider = document.getElementById("pace");
+      const paceValue = document.getElementById("pace-value");
+      paceSlider.addEventListener("input", () => {
+        paceValue.textContent = paceSlider.value;
+      });
 
-    const headers = { "Content-Type": "application/json" }
-    if (isMp3) {
-        headers["Accept"] = "audio/mpeg"
-    }
+      function fromBinary(encoded) {
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return String.fromCharCode(...new Uint16Array(bytes.buffer));
+      }
 
-    const response = await fetch(location.href + "?text=true", {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-    })
+      // Show/hide country code input based on dropdown
+      document.getElementById("country-dropdown").addEventListener("change", (e) => {
+        const countryCodeGroup = document.getElementById("country-code-group");
+        countryCodeGroup.style.display = e.target.value === "custom" ? "flex" : "none";
+      });
 
-    const responseText = response.headers.get("X-Divvun-Text")
-    if (responseText) {
-        document.querySelector(".output").innerText = fromBinary(responseText)
-    }
+      async function speak(text) {
+        const audio = document.querySelector(".audio");
+        const countryDropdown = document.getElementById("country-dropdown");
+        const countryCodeInput = document.getElementById("country-code");
+        const isMp3 = document.getElementById("use-mp3").checked;
+        const language = document.getElementById("language").value;
+        const speaker = document.getElementById("speaker").value;
 
-    const buffer = await response.arrayBuffer()
-    const blob = new Blob([buffer], { type: isMp3 ? "audio/mpeg" : "audio/wav" });
-    audio.src = URL.createObjectURL(blob);
-    audio.play()
-}
+        const body = { text };
 
-const submit2 = async (e) => {
-    e.preventDefault()
-    const node = document.querySelector(".doit")
+        if (countryDropdown.value === "force") {
+          body.country = "";
+        } else if (countryDropdown.value === "custom") {
+          body.country = countryCodeInput.value?.trim().toUpperCase() ?? "";
+        }
 
-    try {
-        const text = document.querySelector(".text").value.trim()
+        const headers = { "Content-Type": "application/json" };
+        if (isMp3) {
+          headers["Accept"] = "audio/mpeg";
+        }
 
-        node.innerHTML = "Generating..."
-        await Promise.all([
-            speak(text),
-        ])
-    } catch (e) {
-        console.error(e)
-        document.querySelector(".output").innerText = "Error: " + e.message
-    } finally {
-        node.innerHTML = "Speak"
-    }
-}
+        const params = new URLSearchParams();
+        params.set("text", "true");
+        params.set("language", language);
+        params.set("speaker", speaker);
+        params.set("pace", document.getElementById("pace").value);
 
-document.querySelector(".doit").addEventListener("click", submit2);
+        const response = await fetch(location.href.split("?")[0] + "?" + params.toString(), {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
 
-// When Cmd+Enter or Ctrl+Enter is pressed, submit the form
-document.querySelector(".text").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        submit(e);
-    }
-})
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || "Request failed");
+        }
 
-</script>
-</div>
-</body>
+        const responseText = response.headers.get("X-Divvun-Text");
+        if (responseText) {
+          document.querySelector(".output").innerText = fromBinary(responseText);
+        } else {
+          document.querySelector(".output").innerText = "";
+        }
+
+        const buffer = await response.arrayBuffer();
+        const blob = new Blob([buffer], { type: isMp3 ? "audio/mpeg" : "audio/wav" });
+        audio.src = URL.createObjectURL(blob);
+        audio.play();
+      }
+
+      const submit = async (e) => {
+        e.preventDefault();
+        const button = document.querySelector(".doit");
+        const output = document.querySelector(".output");
+
+        try {
+          const text = document.querySelector(".text").value.trim();
+          if (!text) {
+            output.innerText = "Please enter some text.";
+            return;
+          }
+
+          button.disabled = true;
+          button.textContent = "Generating...";
+          output.innerText = "Processing...";
+
+          await speak(text);
+        } catch (e) {
+          console.error(e);
+          output.innerText = "Error: " + e.message;
+        } finally {
+          button.disabled = false;
+          button.textContent = "Speak";
+        }
+      };
+
+      document.querySelector(".doit").addEventListener("click", submit);
+
+      // Cmd+Enter or Ctrl+Enter to submit
+      document.querySelector(".text").addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          submit(e);
+        }
+      });
+    </script>
+  </body>
 </html>
