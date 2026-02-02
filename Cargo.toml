@@ -12,7 +12,7 @@ anyhow = "1.0.86"
 async-stream = "0.3.6"
 base64 = "0.22"
 clap = { version = "4.5.31", features = ["derive", "env"] }
-divvun-runtime = { git = "https://github.com/divvun/divvun-runtime.git", default-features = false, features = ["mod-speech", "mod-cg3", "mod-divvun", "mod-hfst"] }
+divvun-runtime = { git = "https://github.com/divvun/divvun-runtime.git", branch = "new-box", default-features = false, features = ["mod-speech", "mod-cg3", "mod-divvun", "mod-hfst"] }
 futures-util = "0.3.31"
 hex = "0.4"
 geoipd = { git = "https://github.com/necessary-nu/geoipd", version = "1.0.0" }
