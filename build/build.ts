@@ -135,10 +135,6 @@ export async function check(target?: string, debug = false, verbose = 0) {
   const args = [
     ...baseCmd,
     "check",
-    "-p",
-    "divvun-runtime-cli",
-    "--features",
-    "divvun-runtime/all-mods,ffi",
   ];
 
   if (!debug) {
