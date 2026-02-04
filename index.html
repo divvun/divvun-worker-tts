@@ -328,6 +328,7 @@
 
       function updateSpeakers() {
         const selected = langSelect.options[langSelect.selectedIndex];
+        if (!selected) return;
         const speakers = JSON.parse(selected.dataset.speakers || "{}");
         speakerSelect.innerHTML = "";
         Object.entries(speakers).forEach(([id, name]) => {
