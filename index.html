@@ -387,8 +387,12 @@
 
         const params = new URLSearchParams();
         params.set("text", "true");
-        params.set("language", language);
-        params.set("speaker", speaker);
+        if (language !== "" && language != null) {
+          params.set("language", language);
+        }
+        if (speaker !== "" && speaker != null) {
+          params.set("speaker", speaker);
+        }
         params.set("pace", document.getElementById("pace").value);
 
         const response = await fetch(location.href.split("?")[0] + "?" + params.toString(), {
