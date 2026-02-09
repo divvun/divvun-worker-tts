@@ -120,10 +120,49 @@ struct ProcessQuery {
     text: bool,
     #[serde(default = "default_pace")]
     pace: f32,
+    /// "f32" for 32-bit float WAV, defaults to 16-bit integer
+    #[serde(default)]
+    sample_format: Option<String>,
 }
 
 fn default_pace() -> f32 {
     1.0
+}
+
+fn write_wav(samples: &[f32], use_f32: bool) -> (&'static str, Vec<u8>) {
+    if use_f32 {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 22050,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let out = Vec::with_capacity(samples.len() * 4 + 44);
+        let mut out = std::io::Cursor::new(out);
+        let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
+        for &s in samples {
+            writer.write_sample(s).expect("Vec write infallible");
+        }
+        drop(writer);
+        ("audio/wav", out.into_inner())
+    } else {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 22050,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let out = Vec::with_capacity(samples.len() * 2 + 44);
+        let mut out = std::io::Cursor::new(out);
+        let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
+        for &s in samples {
+            let clamped = s.clamp(-1.0, 1.0);
+            let sample = (clamped * i16::MAX as f32) as i16;
+            writer.write_sample(sample).expect("Vec write infallible");
+        }
+        drop(writer);
+        ("audio/wav", out.into_inner())
+    }
 }
 
 pub async fn country_lookup(geoip: &Arc<GeoIpLookup>, request: &Request) -> Option<String> {
@@ -462,12 +501,11 @@ async fn process(
         return Err(AppError::NoOutput);
     }
 
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 22050,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
+    let use_f32 = query
+        .sample_format
+        .as_deref()
+        .map(|s| s.eq_ignore_ascii_case("f32"))
+        .unwrap_or(false);
 
     // Check if client accepts MP3
     let wants_mp3 = req
@@ -485,26 +523,10 @@ async fn process(
         }
         #[cfg(not(feature = "mp3"))]
         {
-            // MP3 feature not enabled, fall back to WAV
-            let out = Vec::with_capacity(bytes.len() / 2 + 1);
-            let mut out = std::io::Cursor::new(out);
-            let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
-            for data in bytes {
-                writer.write_sample(data).expect("Vec write infallible");
-            }
-            drop(writer);
-            ("audio/wav", out.into_inner())
+            write_wav(&bytes, use_f32)
         }
     } else {
-        // Client wants WAV or no specific preference
-        let out = Vec::with_capacity(bytes.len() / 2 + 1);
-        let mut out = std::io::Cursor::new(out);
-        let mut writer = hound::WavWriter::new(&mut out, spec).expect("Vec write infallible");
-        for data in bytes {
-            writer.write_sample(data).expect("Vec write infallible");
-        }
-        drop(writer);
-        ("audio/wav", out.into_inner())
+        write_wav(&bytes, use_f32)
     };
 
     let time = time_start.elapsed().as_millis();
@@ -615,16 +637,19 @@ async fn run() -> anyhow::Result<()> {
         }
         PAGE.replace("%LANGUAGE_OPTIONS%", &language_options)
             .replace("%VOICE_SETTINGS_STYLE%", "")
+            .replace("%VERSION%", env!("CARGO_PKG_VERSION"))
     } else {
         PAGE.replace("%LANGUAGE_OPTIONS%", "")
             .replace("%VOICE_SETTINGS_STYLE%", "display: none;")
+            .replace("%VERSION%", env!("CARGO_PKG_VERSION"))
     };
 
     let mut text = HashMap::new();
 
     for (language, voice_config) in config {
         tracing::info!("Loading text bundle for language {}", language);
-        let bundle = Bundle::from_bundle(bundle_base_path.join(format!("text-{}.drb", language))).await?;
+        let bundle =
+            Bundle::from_bundle(bundle_base_path.join(format!("text-{}.drb", language))).await?;
         text.insert(voice_config.language, bundle);
     }
 

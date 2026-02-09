@@ -305,6 +305,14 @@
             </div>
 
             <div class="control-group">
+              <label for="sample-format">WAV sample format:</label>
+              <select id="sample-format">
+                <option value="i16" selected>16-bit integer (default)</option>
+                <option value="f32">32-bit float</option>
+              </select>
+            </div>
+
+            <div class="control-group">
               <label for="country-dropdown">Country detection:</label>
               <select id="country-dropdown">
                 <option value="auto">Auto-detect</option>
@@ -316,6 +324,12 @@
             <div class="control-group" id="country-code-group" style="display: none;">
               <label for="country-code">Country code:</label>
               <input id="country-code" type="text" placeholder="e.g. NO, SE, FI">
+            </div>
+
+            <div>
+              <pre>
+                %VERSION%
+              </pre>
             </div>
           </div>
         </div>
@@ -394,6 +408,10 @@
           params.set("speaker", speaker);
         }
         params.set("pace", document.getElementById("pace").value);
+        const sampleFormat = document.getElementById("sample-format").value;
+        if (sampleFormat === "f32") {
+          params.set("sample_format", "f32");
+        }
 
         const response = await fetch(location.href.split("?")[0] + "?" + params.toString(), {
           method: "POST",
