@@ -1,23 +1,31 @@
 # divvun-worker-tts
 
-## Building
-
-This must be built using `just` due to complex linking requirements.
-
-```
-just build-macos
-# or
-just build-linux
-```
-
 ## Usage
 
+Preferably, download a recent binary from the releases. Building this is a painfully involved process at the moment.
+
+Then:
+
+```bash
+divvun-worker-tts path/to/files
 ```
-divvun-worker-tts path/to/bundle.drb
-```
 
-## Configuration
+Your files directory should include:
 
-Environment variables:
+- `tts.drb` -- this holds your speech synthesizer model
+- `text-XXX.drb` -- the text processing model for a given language code (e.g. `olo`)
+- `config.toml` -- this describes how text processing hooks up with the synthesizer
 
-`HOST` and `PORT` are read for determining which host and port to use. Defaults to `localhost:4000`.
+## Testing
+
+You can access a web UI for testing on `/`.
+
+`/health` provides a server health check.
+
+## API
+
+See <https://api.giellalt.org/#tts>.
+
+## License
+
+Apache-2.0 OR MIT.
