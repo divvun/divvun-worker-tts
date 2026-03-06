@@ -8,7 +8,7 @@ use std::{
 };
 
 use base64::prelude::*;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use divvun_runtime::{bundle::Bundle, modules::Input};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
@@ -30,27 +30,41 @@ use mp3lame_encoder::{Builder, FlushNoGap};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to speech bundle or directory containing tts.drb
-    #[arg(required = true)]
-    bundle_path: PathBuf,
+    #[command(subcommand)]
+    command: Command,
+}
 
-    /// Address to bind to. Formats: tcp://host:port or unix:///path/to/socket
-    #[arg(short, long, env = "ADDRESS", default_value = "tcp://127.0.0.1:4000")]
-    address: String,
+#[derive(Subcommand)]
+enum Command {
+    /// Start the TTS HTTP server
+    Serve {
+        /// Path to speech bundle or directory containing tts.drb
+        bundle_path: PathBuf,
 
-    /// Configuration file (ignored if bundle_path is a directory)
-    #[arg(short, long, env = "CONFIG", default_value = "config.toml")]
-    config_path: PathBuf,
+        /// Address to bind to. Formats: tcp://host:port or unix:///path/to/socket
+        #[arg(short, long, env = "ADDRESS", default_value = "tcp://127.0.0.1:4000")]
+        address: String,
 
-    #[arg(long, env = "MAXMIND_ACCOUNT_ID")]
-    maxmind_account_id: Option<String>,
+        /// Configuration file (ignored if bundle_path is a directory)
+        #[arg(short, long, env = "CONFIG", default_value = "config.toml")]
+        config_path: PathBuf,
 
-    #[arg(long, env = "MAXMIND_LICENSE_KEY")]
-    maxmind_license_key: Option<String>,
+        #[arg(long, env = "MAXMIND_ACCOUNT_ID")]
+        maxmind_account_id: Option<String>,
 
-    /// Show voice selector in web UI (for multi-voice deployments)
-    #[arg(long, env = "MULTI_VOICE")]
-    multi_voice: bool,
+        #[arg(long, env = "MAXMIND_LICENSE_KEY")]
+        maxmind_license_key: Option<String>,
+
+        /// Show voice selector in web UI (for multi-voice deployments)
+        #[arg(long, env = "MULTI_VOICE")]
+        multi_voice: bool,
+    },
+
+    /// Interactively debug a text processing bundle
+    DebugText {
+        /// Path to a text-*.drb bundle file
+        bundle_path: PathBuf,
+    },
 }
 
 type Config = HashMap<String, VoiceConfig>;
@@ -598,23 +612,83 @@ async fn run() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let (config_path, speech_bundle_path, bundle_base_path) = if args.bundle_path.is_dir() {
+    match args.command {
+        Command::Serve {
+            bundle_path,
+            address,
+            config_path,
+            maxmind_account_id,
+            maxmind_license_key,
+            multi_voice,
+        } => {
+            run_serve(
+                bundle_path,
+                address,
+                config_path,
+                maxmind_account_id,
+                maxmind_license_key,
+                multi_voice,
+            )
+            .await
+        }
+        Command::DebugText { bundle_path } => run_debug_text(bundle_path).await,
+    }
+}
+
+async fn run_debug_text(bundle_path: PathBuf) -> anyhow::Result<()> {
+    eprintln!("Loading bundle from {}...", bundle_path.display());
+    let bundle = Bundle::from_bundle(&bundle_path).await?;
+    eprintln!("Bundle loaded. Type text to process (Ctrl-D to quit).");
+
+    let mut rl = rustyline::DefaultEditor::new()?;
+
+    while let Ok(line) = rl.readline("> ") {
+        if line.is_empty() {
+            continue;
+        }
+        let _ = rl.add_history_entry(&line);
+
+        let mut pipeline = bundle
+            .create(serde_json::json!({}))
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create pipeline: {e}"))?;
+
+        let mut stream = pipeline.forward(Input::String(line)).await;
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(Input::String(s)) => println!("{s}"),
+                Ok(Input::ArrayString(arr)) => {
+                    for s in &arr {
+                        println!("{s}");
+                    }
+                }
+                Ok(other) => eprintln!("(unexpected output type: {other:?})"),
+                Err(e) => eprintln!("Error: {e}"),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_serve(
+    bundle_path: PathBuf,
+    address: String,
+    config_path: PathBuf,
+    maxmind_account_id: Option<String>,
+    maxmind_license_key: Option<String>,
+    multi_voice: bool,
+) -> anyhow::Result<()> {
+    let (config_path, speech_bundle_path, bundle_base_path) = if bundle_path.is_dir() {
         // Directory mode: use tts.drb and config.toml from directory
-        let config_path = args.bundle_path.join("config.toml");
-        let speech_bundle_path = args.bundle_path.join("tts.drb");
-        (config_path, speech_bundle_path, args.bundle_path.clone())
+        let config_path = bundle_path.join("config.toml");
+        let speech_bundle_path = bundle_path.join("tts.drb");
+        (config_path, speech_bundle_path, bundle_path)
     } else {
         // File mode: use provided bundle file and config
-        let bundle_base_path = args
-            .bundle_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf();
-        (
-            args.config_path.clone(),
-            args.bundle_path.clone(),
-            bundle_base_path,
-        )
+        let bundle_base_path = bundle_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        (config_path, bundle_path, bundle_base_path)
     };
 
     tracing::info!("Loading config from {}", config_path.display());
@@ -626,7 +700,7 @@ async fn run() -> anyhow::Result<()> {
     let speech = Bundle::from_bundle(&speech_bundle_path).await?;
 
     // Generate language options HTML if multi-voice mode
-    let page = if args.multi_voice {
+    let page = if multi_voice {
         let mut language_options = String::new();
         for (code, voice) in &config {
             let speakers_json = serde_json::to_string(&voice.speakers)?;
@@ -655,14 +729,13 @@ async fn run() -> anyhow::Result<()> {
 
     let holder = PipelineHolder { speech, text, page };
 
-    let geoip = if let (Some(account_id), Some(license_key)) =
-        (args.maxmind_account_id, args.maxmind_license_key)
-    {
-        tracing::info!("Loading GeoIP database");
-        Some(GeoIpLookup::new(account_id, license_key).await?)
-    } else {
-        None
-    };
+    let geoip =
+        if let (Some(account_id), Some(license_key)) = (maxmind_account_id, maxmind_license_key) {
+            tracing::info!("Loading GeoIP database");
+            Some(GeoIpLookup::new(account_id, license_key).await?)
+        } else {
+            None
+        };
 
     let app = Route::new()
         .at("/", post(process).get(process_get))
@@ -672,7 +745,7 @@ async fn run() -> anyhow::Result<()> {
         .with(Cors::default())
         .with(Tracing);
 
-    let address = ListenerAddress::parse(&args.address)?;
+    let address = ListenerAddress::parse(&address)?;
 
     tracing::info!("Starting server on {}", address);
     match address {
