@@ -925,7 +925,7 @@ dependencies = [
 [[package]]
 name = "divvun-speech"
 version = "0.3.0"
-source = "git+https://github.com/divvun/divvun-speech-rs#9729028b5b3a125255a9be58f817365b07058465"
+source = "git+https://github.com/divvun/divvun-speech-rs#8b0832893ce4199c69c42969b81a568843cd5c28"
 dependencies = [
  "cmake",
  "libc",
