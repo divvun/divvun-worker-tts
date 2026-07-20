@@ -9,7 +9,10 @@ use std::{
 
 use base64::prelude::*;
 use clap::{Parser, Subcommand};
-use divvun_runtime::{bundle::Bundle, modules::Input};
+use divvun_runtime::{
+    bundle::Bundle,
+    modules::{AudioWordTiming, PipelineValue},
+};
 use futures_util::StreamExt;
 use geoipd::GeoIpLookup;
 use poem::{
@@ -137,6 +140,9 @@ struct ProcessQuery {
     /// "f32" for 32-bit float WAV, defaults to 16-bit integer
     #[serde(default)]
     sample_format: Option<String>,
+    /// Emit per-word timings in the `X-Divvun-Timings` response header
+    #[serde(default)]
+    timings: bool,
 }
 
 fn default_pace() -> f32 {
@@ -331,7 +337,25 @@ fn convert_to_mp3(samples: &[f32], text: &str) -> anyhow::Result<Vec<u8>> {
 
 enum StreamData {
     Text(Vec<String>),
-    Audio(Vec<f32>),
+    Audio {
+        samples: Vec<f32>,
+        sample_rate: u32,
+        word_timings: Vec<AudioWordTiming>,
+    },
+}
+
+/// Encode per-word timings as a compact binary blob for the `X-Divvun-Timings`
+/// header. Little-endian, repeated per word:
+/// `u32 start_ms | u32 end_ms | u32 str_len (utf-8 bytes) | [str_len] utf-8 bytes`.
+fn encode_timings(timings: &[(u32, u32, String)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (start_ms, end_ms, word) in timings {
+        out.extend_from_slice(&start_ms.to_le_bytes());
+        out.extend_from_slice(&end_ms.to_le_bytes());
+        out.extend_from_slice(&(word.len() as u32).to_le_bytes());
+        out.extend_from_slice(word.as_bytes());
+    }
+    out
 }
 
 #[derive(Debug)]
@@ -410,6 +434,8 @@ async fn process(
                 "language": query.language,
                 "speaker": query.speaker,
                 "pace": query.pace,
+                "raw_audio": true,
+                "word_timings": query.timings,
             }
         }))
         .await
@@ -423,10 +449,9 @@ async fn process(
         .map_err(|e| AppError::TextProcessing(e.to_string()))?;
 
     let mut stream = text_pipeline
-        .forward(Input::String(body.text.clone()))
+        .forward(PipelineValue::String(body.text.clone()))
         .await;
 
-    #[allow(for_loops_over_fallibles)]
     let mut stream = Box::pin(async_stream::stream! {
         while let Some(output) = stream.next().await {
             let output = match output {
@@ -437,54 +462,60 @@ async fn process(
                 }
             };
 
-            match output {
-                Input::String(ref s) => {
-                    yield Ok(StreamData::Text(vec![s.clone()]));
-                }
-                Input::ArrayString(ref s) => {
-                    yield Ok(StreamData::Text(s.clone()));
-                }
-                _ => {}
+            if let PipelineValue::String(ref s) = output {
+                yield Ok(StreamData::Text(vec![s.clone()]));
             }
 
             let mut inner_stream = speech_pipeline.forward(output).await;
 
-            for output in inner_stream.next().await {
+            while let Some(output) = inner_stream.next().await {
                 match output {
-                    Ok(output) => {
-                        let output = match output.try_into_bytes() {
+                    Ok(PipelineValue::Audio(audio)) => {
+                        tracing::debug!(
+                            samples = audio.samples.len(),
+                            timings = audio.word_timings.len(),
+                            "Speech pipeline audio output"
+                        );
+                        yield Ok(StreamData::Audio {
+                            samples: audio.samples,
+                            sample_rate: audio.sample_rate,
+                            word_timings: audio.word_timings,
+                        });
+                    }
+                    // Defensive fallback: not hit while `raw_audio: true`, but keep
+                    // the WAV-bytes path working if the pipeline ever returns bytes.
+                    Ok(other) => {
+                        let bytes = match other.try_into_bytes() {
                             Ok(bytes) => bytes,
                             Err(e) => {
                                 yield Err(divvun_runtime::modules::Error::msg(format!("Failed to convert output to bytes: {:?}", e)));
                                 return;
                             }
                         };
-                        tracing::debug!(
-                            len = output.len(),
-                            header = ?output.get(0..12).map(|h| String::from_utf8_lossy(h).to_string()),
-                            "Speech pipeline output"
-                        );
-                        let mut reader = match hound::WavReader::new(std::io::Cursor::new(output.clone())) {
+                        let mut reader = match hound::WavReader::new(std::io::Cursor::new(bytes.clone())) {
                             Ok(reader) => reader,
                             Err(e) => {
                                 tracing::error!(
-                                    len = output.len(),
-                                    header_hex = ?output.get(0..44).map(hex::encode),
+                                    len = bytes.len(),
+                                    header_hex = ?bytes.get(0..44).map(hex::encode),
                                     "Failed to parse WAV: {}", e
                                 );
                                 yield Err(divvun_runtime::modules::Error::msg(format!("Failed to read WAV data: {}", e)));
                                 return;
                             }
                         };
-                        let samples = reader.samples::<f32>().collect::<Result<Vec<_>, _>>();
-                        let samples = match samples {
+                        let samples = match reader.samples::<f32>().collect::<Result<Vec<_>, _>>() {
                             Ok(samples) => samples,
                             Err(e) => {
                                 yield Err(divvun_runtime::modules::Error::msg(e.to_string()));
                                 return;
                             }
                         };
-                        yield Ok(StreamData::Audio(samples));
+                        yield Ok(StreamData::Audio {
+                            samples,
+                            sample_rate: 22050,
+                            word_timings: Vec::new(),
+                        });
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "Speech pipeline returned error");
@@ -495,8 +526,9 @@ async fn process(
         }
     });
 
-    let mut bytes = Vec::new();
+    let mut bytes: Vec<f32> = Vec::new();
     let mut texts = Vec::new();
+    let mut all_timings: Vec<(u32, u32, String)> = Vec::new();
     while let Some(output) = stream.next().await {
         match output {
             Ok(StreamData::Text(text)) => {
@@ -504,7 +536,20 @@ async fn process(
                     texts.extend(text);
                 }
             }
-            Ok(StreamData::Audio(output)) => bytes.extend(output),
+            Ok(StreamData::Audio {
+                samples,
+                sample_rate,
+                word_timings,
+            }) => {
+                // Word timings are sample ranges into this buffer; offset them by the
+                // samples already accumulated so they refer to the concatenated output.
+                let offset = bytes.len();
+                for t in word_timings {
+                    let to_ms = |s: usize| ((offset + s) as u64 * 1000 / sample_rate as u64) as u32;
+                    all_timings.push((to_ms(t.start_sample), to_ms(t.end_sample), t.word));
+                }
+                bytes.extend(samples);
+            }
             Err(e) => {
                 return Err(AppError::SpeechSynthesis(e.to_string()));
             }
@@ -558,6 +603,12 @@ async fn process(
         .header("Content-Type", content_type)
         .header("X-Divvun-Language", query.language.to_string())
         .header("X-Divvun-Voice", query.speaker.to_string());
+
+    // Add per-word timings as a base64-encoded binary header if requested
+    if query.timings && !all_timings.is_empty() {
+        let encoded_timings = BASE64_STANDARD.encode(encode_timings(&all_timings));
+        response = response.header("X-Divvun-Timings", encoded_timings);
+    }
 
     // Add processed text as base64-encoded header if requested
     if query.text && !texts.is_empty() {
@@ -653,16 +704,11 @@ async fn run_debug_text(bundle_path: PathBuf) -> anyhow::Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create pipeline: {e}"))?;
 
-        let mut stream = pipeline.forward(Input::String(line)).await;
+        let mut stream = pipeline.forward(PipelineValue::String(line)).await;
 
         while let Some(result) = stream.next().await {
             match result {
-                Ok(Input::String(s)) => println!("{s}"),
-                Ok(Input::ArrayString(arr)) => {
-                    for s in &arr {
-                        println!("{s}");
-                    }
-                }
+                Ok(PipelineValue::String(s)) => println!("{s}"),
                 Ok(other) => eprintln!("(unexpected output type: {other:?})"),
                 Err(e) => eprintln!("Error: {e}"),
             }

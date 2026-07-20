@@ -150,6 +150,38 @@
         word-wrap: break-word;
       }
 
+      .transcript {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        padding: 1rem;
+        min-height: 60px;
+        line-height: 2;
+        font-size: 16px;
+      }
+
+      .transcript:empty::before {
+        content: "Word timings will appear here after speaking.";
+        color: #aaa;
+        font-size: 14px;
+      }
+
+      .transcript .word {
+        padding: 0 3px;
+        border-radius: 3px;
+        cursor: pointer;
+        transition: background-color 0.1s, color 0.1s;
+      }
+
+      .transcript .word:hover {
+        background: #e0e0e0;
+      }
+
+      .transcript .word.active {
+        background: #3498db;
+        color: #fff;
+      }
+
       .section-header {
         display: flex;
         justify-content: space-between;
@@ -265,6 +297,11 @@
         </div>
 
         <div class="output-section">
+          <label>Transcript (click a word to seek):</label>
+          <div class="transcript"></div>
+        </div>
+
+        <div class="output-section">
           <label>Processed Text:</label>
           <div class="output"></div>
         </div>
@@ -372,6 +409,83 @@
         return String.fromCharCode(...new Uint16Array(bytes.buffer));
       }
 
+      // Decode the X-Divvun-Timings header: base64 of repeated little-endian
+      // records `u32 start_ms | u32 end_ms | u32 utf8_len | utf8 bytes`.
+      function parseTimings(encoded) {
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const view = new DataView(bytes.buffer);
+        const decoder = new TextDecoder("utf-8");
+        const words = [];
+        let off = 0;
+        while (off + 12 <= bytes.length) {
+          const start = view.getUint32(off, true);
+          const end = view.getUint32(off + 4, true);
+          const len = view.getUint32(off + 8, true);
+          off += 12;
+          if (off + len > bytes.length) break;
+          words.push({ start, end, word: decoder.decode(bytes.subarray(off, off + len)) });
+          off += len;
+        }
+        return words;
+      }
+
+      const audioEl = document.querySelector(".audio");
+      const transcriptEl = document.querySelector(".transcript");
+      let currentTimings = [];
+      let highlightRaf = null;
+
+      function renderTranscript(words) {
+        transcriptEl.innerHTML = "";
+        words.forEach((w) => {
+          const span = document.createElement("span");
+          span.className = "word";
+          span.textContent = w.word;
+          span.addEventListener("click", () => {
+            audioEl.currentTime = w.start / 1000;
+            audioEl.play();
+          });
+          transcriptEl.appendChild(span);
+          transcriptEl.appendChild(document.createTextNode(" "));
+        });
+      }
+
+      function updateHighlight() {
+        // transcriptEl.children is the ordered list of word spans (text nodes excluded).
+        const spans = transcriptEl.children;
+        const ms = audioEl.currentTime * 1000;
+        let activeIndex = -1;
+        for (let i = 0; i < currentTimings.length; i++) {
+          if (ms >= currentTimings[i].start && ms < currentTimings[i].end) {
+            activeIndex = i;
+            break;
+          }
+        }
+        for (let i = 0; i < spans.length; i++) {
+          spans[i].classList.toggle("active", i === activeIndex);
+        }
+      }
+
+      function highlightLoop() {
+        updateHighlight();
+        if (!audioEl.paused && !audioEl.ended) {
+          highlightRaf = requestAnimationFrame(highlightLoop);
+        }
+      }
+
+      audioEl.addEventListener("play", () => {
+        cancelAnimationFrame(highlightRaf);
+        highlightLoop();
+      });
+      audioEl.addEventListener("seeked", updateHighlight);
+      audioEl.addEventListener("ended", () => {
+        cancelAnimationFrame(highlightRaf);
+        for (const span of transcriptEl.children) span.classList.remove("active");
+      });
+
       // Show/hide country code input based on dropdown
       document.getElementById("country-dropdown").addEventListener("change", (e) => {
         const countryCodeGroup = document.getElementById("country-code-group");
@@ -401,6 +515,7 @@
 
         const params = new URLSearchParams();
         params.set("text", "true");
+        params.set("timings", "true");
         if (language !== "" && language != null) {
           params.set("language", language);
         }
@@ -429,6 +544,15 @@
           document.querySelector(".output").innerText = fromBinary(responseText);
         } else {
           document.querySelector(".output").innerText = "";
+        }
+
+        const timingsHeader = response.headers.get("X-Divvun-Timings");
+        if (timingsHeader) {
+          currentTimings = parseTimings(timingsHeader);
+          renderTranscript(currentTimings);
+        } else {
+          currentTimings = [];
+          transcriptEl.innerHTML = "";
         }
 
         const buffer = await response.arrayBuffer();
